@@ -7,7 +7,30 @@ import { chipAccentColor } from '../utils/chipInlineSx';
 import Link from '@mui/material/Link';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import ImageIcon from '@mui/icons-material/Image';
-import { isImageAttachment } from '../utils/fileTypes';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import TableChartIcon from '@mui/icons-material/TableChart';
+import SlideshowIcon from '@mui/icons-material/Slideshow';
+import ArticleIcon from '@mui/icons-material/Article';
+import FolderZipIcon from '@mui/icons-material/FolderZip';
+import VideoFileIcon from '@mui/icons-material/VideoFile';
+import AudioFileIcon from '@mui/icons-material/AudioFile';
+import CodeIcon from '@mui/icons-material/Code';
+import TextSnippetIcon from '@mui/icons-material/TextSnippet';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import { getNonImageAttachmentKind, isImageAttachment } from '../utils/fileTypes';
+
+const FILE_KIND_ICONS = {
+  pdf: PictureAsPdfIcon,
+  spreadsheet: TableChartIcon,
+  presentation: SlideshowIcon,
+  document: ArticleIcon,
+  archive: FolderZipIcon,
+  video: VideoFileIcon,
+  audio: AudioFileIcon,
+  code: CodeIcon,
+  text: TextSnippetIcon,
+  generic: InsertDriveFileIcon,
+};
 
 const ChatMediaSummary = ({ messages, onOpenAttachment }) => {
   const attachments = useMemo(() => {
@@ -120,30 +143,39 @@ const ChatMediaSummary = ({ messages, onOpenAttachment }) => {
             Tệp khác
           </Typography>
           <Stack spacing={0.5} sx={{ px: 2, pb: 2, overflow: 'auto' }}>
-            {fileItems.map((item) => (
-              <Link
-                key={`${item.messageId}-${item.file.name}`}
-                component="button"
-                type="button"
-                variant="body2"
-                onClick={() => handleActivate(item.messageId)}
-                underline="hover"
-                sx={{
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  display: 'block',
-                  wordBreak: 'break-word',
-                  color: 'primary.main',
-                  fontWeight: 600,
-                  border: 'none',
-                  background: 'none',
-                  p: 0,
-                  font: 'inherit',
-                }}
-              >
-                {item.file.name || 'Tệp đính kèm'}
-              </Link>
-            ))}
+            {fileItems.map((item) => {
+              const kind = getNonImageAttachmentKind(item.file);
+              const FileKindIcon = FILE_KIND_ICONS[kind] || InsertDriveFileIcon;
+              return (
+                <Link
+                  key={`${item.messageId}-${item.file.name}`}
+                  component="button"
+                  type="button"
+                  variant="body2"
+                  onClick={() => handleActivate(item.messageId)}
+                  underline="hover"
+                  sx={{
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 0.75,
+                    wordBreak: 'break-word',
+                    color: 'primary.main',
+                    fontWeight: 600,
+                    border: 'none',
+                    background: 'none',
+                    p: 0,
+                    font: 'inherit',
+                  }}
+                >
+                  <FileKindIcon sx={{ fontSize: '1.15rem', flexShrink: 0, mt: '1px', opacity: 0.92 }} aria-hidden />
+                  <Box component="span" sx={{ minWidth: 0 }}>
+                    {item.file.name || 'Tệp đính kèm'}
+                  </Box>
+                </Link>
+              );
+            })}
           </Stack>
         </>
       ) : null}

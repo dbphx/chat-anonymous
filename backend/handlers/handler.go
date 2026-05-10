@@ -2,22 +2,51 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"chat-anonymous/backend/models"
 	"chat-anonymous/backend/services"
+	"chat-anonymous/backend/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
+const roomPreviewMaxRunes = 72
+const fileNamePreviewMaxRunes = 36
+
+func truncateRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max]) + "…"
+}
+
+func previewFromMessage(m *models.Message) string {
+	if m == nil {
+		return ""
+	}
+	if m.File != nil {
+		ct := strings.ToLower(strings.TrimSpace(m.File.ContentType))
+		if strings.HasPrefix(ct, "image/") {
+			return "[Ảnh]"
+		}
+		name := strings.TrimSpace(m.File.Name)
+		if name != "" {
+			return "[Tệp] " + truncateRunes(name, fileNamePreviewMaxRunes)
+		}
+		return "[Tệp]"
+	}
+	if strings.TrimSpace(m.Content) != "" {
+		return truncateRunes(m.Content, roomPreviewMaxRunes)
+	}
+	return ""
+}
+
 const roomSecretHeader = "X-Room-Secret"
-const uploadDir = "uploads"
 
 // RoomHandler handles room-related HTTP requests
 type RoomHandler struct {
@@ -25,20 +54,35 @@ type RoomHandler struct {
 	messageService *services.MessageService
 }
 
-type roomResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Created   int64  `json:"created"`
-	UserCount int    `json:"user_count"`
+type lastMessageResponse struct {
+	User    string `json:"user"`
+	Preview string `json:"preview"`
+	Created int64  `json:"created"`
 }
 
-func toRoomResponse(room *models.Room, userCount int) roomResponse {
-	return roomResponse{
+type roomResponse struct {
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Created     int64                `json:"created"`
+	UserCount   int                  `json:"user_count"`
+	LastMessage *lastMessageResponse `json:"last_message,omitempty"`
+}
+
+func toRoomResponse(room *models.Room, userCount int, last *models.Message) roomResponse {
+	r := roomResponse{
 		ID:        room.ID,
 		Name:      room.Name,
 		Created:   room.Created,
 		UserCount: userCount,
 	}
+	if last != nil {
+		r.LastMessage = &lastMessageResponse{
+			User:    last.User,
+			Preview: previewFromMessage(last),
+			Created: last.Created,
+		}
+	}
+	return r
 }
 
 func roomIDsFromItems(items []models.Room) []string {
@@ -73,10 +117,16 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
 		return
 	}
+	lasts, err := h.messageService.LastMessagesByRoomIDs(roomIDsFromItems(result.Items))
+	if err != nil {
+		logrus.Error("Failed to load last messages for rooms:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
+		return
+	}
 	responses := make([]roomResponse, 0, len(result.Items))
 	for i := range result.Items {
 		roomCopy := result.Items[i]
-		responses = append(responses, toRoomResponse(&roomCopy, counts[roomCopy.ID]))
+		responses = append(responses, toRoomResponse(&roomCopy, counts[roomCopy.ID], lasts[roomCopy.ID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items": responses,
@@ -108,7 +158,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toRoomResponse(createdRoom, 0))
+	c.JSON(http.StatusCreated, toRoomResponse(createdRoom, 0, nil))
 }
 
 // GetRoom retrieves a room by ID
@@ -126,7 +176,13 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get room"})
 		return
 	}
-	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
+	last, err := h.messageService.GetLastMessageInRoom(room.ID)
+	if err != nil {
+		logrus.Error("Failed to load last message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID], last))
 }
 
 // JoinRoom checks the provided secret and returns room info.
@@ -166,7 +222,13 @@ func (h *RoomHandler) JoinRoom(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
 		return
 	}
-	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
+	last, err := h.messageService.GetLastMessageInRoom(room.ID)
+	if err != nil {
+		logrus.Error("Failed to load last message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID], last))
 }
 
 // DeleteRoom deletes a room by ID
@@ -361,60 +423,11 @@ func parseMessageRequest(c *gin.Context, requireUser bool) (*sendMessagePayload,
 }
 
 func saveUploadedFile(fileHeader *multipart.FileHeader) (*models.MessageFile, error) {
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return nil, err
-	}
-
-	source, err := fileHeader.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer source.Close()
-
-	filename := filepath.Base(fileHeader.Filename)
-	storedName := fmt.Sprintf("%s-%s", models.NewID("file"), filename)
-	destinationPath := filepath.Join(uploadDir, storedName)
-
-	destination, err := os.Create(destinationPath)
-	if err != nil {
-		return nil, err
-	}
-	defer destination.Close()
-
-	if _, err := io.Copy(destination, source); err != nil {
-		return nil, err
-	}
-
-	contentType := fileHeader.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	return &models.MessageFile{
-		Name:        filename,
-		URL:         "/uploads/" + storedName,
-		Size:        fileHeader.Size,
-		ContentType: contentType,
-	}, nil
+	return storage.SaveMultipartFile(fileHeader)
 }
 
 func removeUploadedFile(fileURL string) error {
-	trimmedURL := strings.TrimSpace(fileURL)
-	if trimmedURL == "" {
-		return nil
-	}
-
-	storedName := strings.TrimPrefix(trimmedURL, "/uploads/")
-	if storedName == "" || storedName == trimmedURL {
-		return nil
-	}
-
-	path := filepath.Join(uploadDir, filepath.Base(storedName))
-	err := os.Remove(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
+	return storage.DeleteByURL(fileURL)
 }
 
 func rollbackUploadedFile(fileMeta *models.MessageFile) {

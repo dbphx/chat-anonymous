@@ -4,11 +4,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 
+	"chat-anonymous/backend/cache"
 	"chat-anonymous/backend/handlers"
 	"chat-anonymous/backend/models"
 	"chat-anonymous/backend/services"
+	"chat-anonymous/backend/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -34,12 +35,16 @@ func main() {
 		log.Fatal("Failed to bootstrap default admin:", err)
 	}
 
+	if err := storage.InitFromEnv(); err != nil {
+		log.Fatal("Failed to init storage:", err)
+	}
+
+	if err := cache.InitFromEnv(); err != nil {
+		log.Fatal("Failed to init redis:", err)
+	}
+
 	// Initialize router
 	router := gin.Default()
-	uploadPath := filepath.Clean("uploads")
-	if err := os.MkdirAll(uploadPath, 0o755); err != nil {
-		log.Fatal("Failed to create uploads directory:", err)
-	}
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Room-Secret")
@@ -50,7 +55,17 @@ func main() {
 		}
 		c.Next()
 	})
-	router.Static("/uploads", uploadPath)
+	if storage.IsLocal() {
+		uploadHandler := storage.GinLocalUploads()
+		router.GET("/uploads/*filepath", uploadHandler)
+		router.HEAD("/uploads/*filepath", uploadHandler)
+	}
+
+	if storage.IsMinIO() {
+		imgProxy := handlers.CachedMinIOImage()
+		router.GET("/api/media/image/*filepath", imgProxy)
+		router.HEAD("/api/media/image/*filepath", imgProxy)
+	}
 
 	// Initialize handlers
 	roomHandler := handlers.NewRoomHandler(roomService, messageService)

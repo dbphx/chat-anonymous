@@ -456,7 +456,6 @@ function App() {
   };
 
   const refreshLobbyRoomsForChat = useCallback(async () => {
-    setUserBusy(true);
     try {
       await fetchRoomsPage({
         q: '',
@@ -466,8 +465,6 @@ function App() {
       setUserError('');
     } catch (loadError) {
       setUserError(loadError.message);
-    } finally {
-      setUserBusy(false);
     }
   }, [fetchRoomsPage]);
 

@@ -2,12 +2,11 @@ package services
 
 import (
 	"chat-anonymous/backend/models"
+	"chat-anonymous/backend/storage"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -32,8 +31,6 @@ var ErrRoomNotFound = errors.New("room not found")
 var ErrMessageNotFound = errors.New("message not found")
 var ErrMessageNotOwned = errors.New("message does not belong to user")
 var ErrEmptyMessageContent = errors.New("message content cannot be empty")
-
-const uploadDir = "uploads"
 
 // NewRoomService creates a new RoomService
 func NewRoomService(db *mongo.Client) *RoomService {
@@ -103,7 +100,7 @@ func (s *RoomService) deleteRoom(id, secret string, validateSecret bool) error {
 		if message.File == nil {
 			continue
 		}
-		if err := removeUploadedFile(message.File.URL); err != nil {
+		if err := storage.DeleteByURL(message.File.URL); err != nil {
 			return err
 		}
 	}
@@ -420,21 +417,56 @@ func (s *MessageService) CountDistinctUsersByRoomIDs(roomIDs []string) (map[stri
 	return out, cursor.Err()
 }
 
-func removeUploadedFile(fileURL string) error {
-	trimmedURL := strings.TrimSpace(fileURL)
-	if trimmedURL == "" {
-		return nil
+// LastMessagesByRoomIDs returns the most recent message per room (by created desc).
+func (s *MessageService) LastMessagesByRoomIDs(roomIDs []string) (map[string]*models.Message, error) {
+	out := make(map[string]*models.Message)
+	if len(roomIDs) == 0 {
+		return out, nil
 	}
 
-	storedName := strings.TrimPrefix(trimmedURL, "/uploads/")
-	if storedName == "" || storedName == trimmedURL {
-		return nil
+	ctx := context.TODO()
+	collection := s.db.Database("chat").Collection("messages")
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.M{"room_id": bson.M{"$in": roomIDs}}}},
+		bson.D{{Key: "$sort", Value: bson.M{"created": -1}}},
+		bson.D{{Key: "$group", Value: bson.M{
+			"_id": "$room_id",
+			"doc": bson.M{"$first": "$$ROOT"},
+		}}},
 	}
 
-	path := filepath.Join(uploadDir, filepath.Base(storedName))
-	err := os.Remove(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	cursor, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer cursor.Close(ctx)
+
+	type groupedRow struct {
+		RoomID string         `bson:"_id"`
+		Doc    models.Message `bson:"doc"`
+	}
+
+	for cursor.Next(ctx) {
+		var row groupedRow
+		if err := cursor.Decode(&row); err != nil {
+			return nil, err
+		}
+		msg := row.Doc
+		out[row.RoomID] = &msg
+	}
+
+	return out, cursor.Err()
 }
+
+// GetLastMessageInRoom returns the newest message in a room, or nil if none.
+func (s *MessageService) GetLastMessageInRoom(roomID string) (*models.Message, error) {
+	if strings.TrimSpace(roomID) == "" {
+		return nil, nil
+	}
+	lasts, err := s.LastMessagesByRoomIDs([]string{roomID})
+	if err != nil {
+		return nil, err
+	}
+	return lasts[roomID], nil
+}
+

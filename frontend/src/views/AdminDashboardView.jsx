@@ -25,6 +25,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PeopleIcon from '@mui/icons-material/People';
 import MainNavbar from '../components/MainNavbar';
 import DataTable from '../components/DataTable';
 import SectionCard from '../components/SectionCard';
@@ -89,8 +90,8 @@ const AdminDashboardView = ({
   const canManageUsers = adminUser?.role === 'admin';
   const adminTabs = canManageUsers
     ? [
-        { id: 'rooms', label: 'Phòng', shortLabel: 'Ph' },
-        { id: 'users', label: 'Người dùng', shortLabel: 'ND' },
+        { id: 'rooms', label: 'Phòng', shortLabel: 'Ph', icon: MeetingRoomIcon },
+        { id: 'users', label: 'Người dùng', shortLabel: 'ND', icon: PeopleIcon },
       ]
     : null;
 

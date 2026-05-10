@@ -26,6 +26,7 @@ import { parseJsonResponse } from '../utils/parseJsonResponse';
 import { roomUserCount } from '../utils/roomMeta';
 import { chipAccentColor, chipBesideLabelSx, chipFilledIdentitySx, chipNameColor, labelBesideChipSx, labelChipRowSx } from '../utils/chipInlineSx';
 import { iconOutlinedSoft, iconPrimaryFilled, iconPrimaryFilledDisabled } from '../utils/iconSx';
+import { isImageAttachment } from '../utils/fileTypes';
 
 const POLL_INTERVAL_MS = 3000;
 const ROOM_SECRET_HEADER = 'X-Room-Secret';
@@ -50,25 +51,54 @@ const readHeaderExpanded = (roomId) => {
   return false;
 };
 
+/** Ảnh từ MinIO public URL → proxy backend + Redis cache */
+const rewriteMinioImageToCachedProxy = (apiBaseUrl, file, resolvedUrl) => {
+  if (!resolvedUrl || !isImageAttachment(file)) {
+    return resolvedUrl;
+  }
+  try {
+    const u = new URL(resolvedUrl);
+    const marker = '/chat-uploads/';
+    const idx = u.pathname.indexOf(marker);
+    if (idx === -1) {
+      return resolvedUrl;
+    }
+    const tail = u.pathname.slice(idx + marker.length).replace(/^\/+/, '');
+    const key = tail.split('/').filter(Boolean).pop();
+    if (!key || decodeURIComponent(key).includes('..')) {
+      return resolvedUrl;
+    }
+    const base = apiBaseUrl.replace(/\/$/, '');
+    return `${base}/api/media/image/${encodeURIComponent(key)}`;
+  } catch {
+    return resolvedUrl;
+  }
+};
+
 const normalizeMessages = (apiBaseUrl, items) => {
   const safeItems = Array.isArray(items) ? items : [];
 
-  return safeItems.map((message) => ({
-    ...message,
-    pinned: Boolean(message.pinned),
-    reply_to: message.reply_to ? {
-      ...message.reply_to,
-      content: message.reply_to.content || '',
-    } : null,
-    file: message.file ? {
-      ...message.file,
-      url: !message.file.url
-        ? ''
-        : (message.file.url.startsWith('http://') || message.file.url.startsWith('https://')
-          ? message.file.url
-          : `${apiBaseUrl}${message.file.url}`),
-    } : null,
-  }));
+  return safeItems.map((message) => {
+    const file = message.file;
+    const resolvedUrl = !file?.url
+      ? ''
+      : (file.url.startsWith('http://') || file.url.startsWith('https://')
+        ? file.url
+        : `${apiBaseUrl}${file.url}`);
+
+    return {
+      ...message,
+      pinned: Boolean(message.pinned),
+      reply_to: message.reply_to ? {
+        ...message.reply_to,
+        content: message.reply_to.content || '',
+      } : null,
+      file: file ? {
+        ...file,
+        url: rewriteMinioImageToCachedProxy(apiBaseUrl, file, resolvedUrl),
+      } : null,
+    };
+  });
 };
 
 const toReplyBannerMessage = (message) => ({
@@ -122,6 +152,44 @@ const ChatView = ({
     return names.size;
   }, [messages]);
 
+  const refreshAdminLobbyRooms = useCallback(
+    async ({ quiet } = {}) => {
+      if (!isAdminMode || !adminToken || apiBaseUrl == null || String(apiBaseUrl).trim() === '') {
+        return;
+      }
+      const base = String(apiBaseUrl).replace(/\/$/, '');
+      if (!quiet) {
+        setAdminLobbyLoading(true);
+      }
+      try {
+        const response = await fetch(`${base}/api/admin/rooms?page=1&limit=100`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        });
+        const data = await parseJsonResponse(response);
+        if (Array.isArray(data.items)) {
+          setAdminLobbyRooms(data.items);
+        }
+      } catch {
+        setAdminLobbyRooms([]);
+      } finally {
+        if (!quiet) {
+          setAdminLobbyLoading(false);
+        }
+      }
+    },
+    [isAdminMode, adminToken, apiBaseUrl],
+  );
+
+  const syncSidebarRoomsAfterMessages = useCallback(async () => {
+    if (isAdminMode) {
+      await refreshAdminLobbyRooms({ quiet: true });
+      return;
+    }
+    if (typeof onRefreshLobbyRooms === 'function') {
+      await onRefreshLobbyRooms();
+    }
+  }, [isAdminMode, onRefreshLobbyRooms, refreshAdminLobbyRooms]);
+
   useEffect(() => {
     setHeaderExpanded(readHeaderExpanded(room?.id));
   }, [room?.id]);
@@ -141,35 +209,9 @@ const ChatView = ({
     if (!isAdminMode || !adminToken || apiBaseUrl == null || String(apiBaseUrl).trim() === '') {
       return undefined;
     }
-
-    let cancelled = false;
-    const base = String(apiBaseUrl).replace(/\/$/, '');
-    setAdminLobbyLoading(true);
-
-    fetch(`${base}/api/admin/rooms?page=1&limit=100`, {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    })
-      .then(parseJsonResponse)
-      .then((data) => {
-        if (!cancelled && Array.isArray(data.items)) {
-          setAdminLobbyRooms(data.items);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAdminLobbyRooms([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAdminLobbyLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdminMode, adminToken, apiBaseUrl, room?.id]);
+    refreshAdminLobbyRooms({ quiet: false });
+    return undefined;
+  }, [isAdminMode, adminToken, apiBaseUrl, room?.id, refreshAdminLobbyRooms]);
 
   useEffect(() => {
     if (isAdminMode || typeof onRefreshLobbyRooms !== 'function') {
@@ -300,6 +342,7 @@ const ChatView = ({
       }
 
       await refreshMessages();
+      await syncSidebarRoomsAfterMessages();
       setReplyTarget(null);
       return true;
     } catch (sendError) {
@@ -326,6 +369,7 @@ const ChatView = ({
       }
 
       await refreshMessages();
+      await syncSidebarRoomsAfterMessages();
       setEditingMessage(null);
       return true;
     } catch (updateError) {
@@ -358,6 +402,7 @@ const ChatView = ({
       }
 
       await refreshMessages();
+      await syncSidebarRoomsAfterMessages();
       if (replyTarget?.id === message.id) {
         setReplyTarget(null);
       }

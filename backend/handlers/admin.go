@@ -273,10 +273,16 @@ func (h *AdminHandler) GetRooms(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
 		return
 	}
+	lasts, err := h.messageService.LastMessagesByRoomIDs(roomIDsFromItems(result.Items))
+	if err != nil {
+		logrus.Error("Failed to load last messages for rooms:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
+		return
+	}
 	responses := make([]roomResponse, 0, len(result.Items))
 	for i := range result.Items {
 		room := result.Items[i]
-		responses = append(responses, toRoomResponse(&room, counts[room.ID]))
+		responses = append(responses, toRoomResponse(&room, counts[room.ID], lasts[room.ID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items": responses,
@@ -309,7 +315,13 @@ func (h *AdminHandler) JoinRoom(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
 		return
 	}
-	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
+	last, err := h.messageService.GetLastMessageInRoom(room.ID)
+	if err != nil {
+		logrus.Error("Failed to load last message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID], last))
 }
 
 func (h *AdminHandler) DeleteRoom(c *gin.Context) {

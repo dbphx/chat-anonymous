@@ -164,35 +164,42 @@ const MainNavbar = ({
         <Box sx={{ flex: 1, overflow: 'auto', py: 1 }}>
           {tabs?.length ? (
             <List component="nav" aria-label="Mục chính" sx={{ px: 0.5 }}>
-              {tabs.map((tab) => (
-                <Tooltip key={tab.id} title={collapsed ? tab.label : ''} placement="right">
-                  <ListItemButton
-                    selected={activeTab === tab.id}
-                    onClick={() => onTabChange(tab.id)}
-                    id={`tab-${tab.id}`}
-                    role="tab"
-                    aria-selected={activeTab === tab.id}
-                    sx={{
-                      borderRadius: 1,
-                      mb: 0.5,
-                      justifyContent: collapsed ? 'center' : 'flex-start',
-                      px: collapsed ? 1 : 2,
-                    }}
-                  >
-                    <ListItemIcon
+              {tabs.map((tab) => {
+                const TabIcon = tab.icon;
+                return (
+                  <Tooltip key={tab.id} title={collapsed ? tab.label : ''} placement="right">
+                    <ListItemButton
+                      selected={activeTab === tab.id}
+                      onClick={() => onTabChange(tab.id)}
+                      id={`tab-${tab.id}`}
+                      role="tab"
+                      aria-selected={activeTab === tab.id}
                       sx={{
-                        minWidth: collapsed ? 0 : 40,
-                        justifyContent: 'center',
+                        borderRadius: 1,
+                        mb: 0.5,
+                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        px: collapsed ? 1 : 2,
                       }}
                     >
-                      <Typography variant="caption" fontWeight={700} aria-hidden>
-                        {tab.shortLabel || tab.label.slice(0, 2)}
-                      </Typography>
-                    </ListItemIcon>
-                    {!collapsed ? <ListItemText primary={tab.label} /> : null}
-                  </ListItemButton>
-                </Tooltip>
-              ))}
+                      <ListItemIcon
+                        sx={{
+                          minWidth: collapsed ? 0 : 40,
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {TabIcon ? (
+                          <TabIcon fontSize="small" aria-hidden />
+                        ) : (
+                          <Typography variant="caption" fontWeight={700} aria-hidden>
+                            {tab.shortLabel || tab.label.slice(0, 2)}
+                          </Typography>
+                        )}
+                      </ListItemIcon>
+                      {!collapsed ? <ListItemText primary={tab.label} /> : null}
+                    </ListItemButton>
+                  </Tooltip>
+                );
+              })}
             </List>
           ) : null}
         </Box>

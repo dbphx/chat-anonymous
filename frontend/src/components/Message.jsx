@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '@mui/material/styles';
-import { isImageAttachment } from '../utils/fileTypes';
+import { isImageAttachment, isPdfAttachment, isVideoAttachment } from '../utils/fileTypes';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Paper from '@mui/material/Paper';
@@ -34,6 +34,8 @@ const Message = ({
   const hasText = Boolean(message.content);
   const hasFile = Boolean(message.file?.url);
   const showImagePreview = hasFile && isImageAttachment(message.file);
+  const showPdfPreview = hasFile && !showImagePreview && isPdfAttachment(message.file);
+  const showVideoPreview = hasFile && !showImagePreview && isVideoAttachment(message.file);
   const replyPreview = message.reply_to;
   const [anchorEl, setAnchorEl] = useState(null);
   const [imageBroken, setImageBroken] = useState(false);
@@ -137,12 +139,12 @@ const Message = ({
           </Typography>
         ) : null}
         {hasFile ? (
-          showImagePreview && !imageBroken ? (
-            <Box sx={{ mt: 1 }}>
+          <Box sx={{ mt: 1 }}>
+            {showImagePreview && !imageBroken ? (
               <Box
                 component="img"
                 src={message.file.url}
-                alt={message.file.name || 'Ảnh đính kèm'}
+                alt="Ảnh đính kèm"
                 loading="lazy"
                 onError={() => setImageBroken(true)}
                 sx={{
@@ -156,21 +158,92 @@ const Message = ({
                   bgcolor: isOwnMessage ? 'rgba(0,0,0,0.1)' : 'grey.100',
                 }}
               />
-            </Box>
-          ) : (
-            <Link
-              href={message.file.url}
-              target="_blank"
-              rel="noreferrer"
-              underline="always"
-              sx={{ mt: 1, display: 'inline-block' }}
-            >
-              <Typography variant="body2" component="span">
-                {message.file.name}
-                {message.file.size ? ` (${message.file.size} bytes)` : ''}
-              </Typography>
-            </Link>
-          )
+            ) : showImagePreview && imageBroken ? (
+              <Link
+                href={message.file.url}
+                target="_blank"
+                rel="noreferrer"
+                underline="hover"
+                sx={{
+                  color: 'inherit',
+                  opacity: 0.95,
+                }}
+              >
+                <Typography variant="body2" component="span">
+                  Mở ảnh
+                </Typography>
+              </Link>
+            ) : showPdfPreview ? (
+              <Stack spacing={0.75}>
+                <Box
+                  sx={{
+                    borderRadius: 1,
+                    overflow: 'hidden',
+                    bgcolor: isOwnMessage ? 'rgba(0,0,0,0.12)' : 'grey.100',
+                    lineHeight: 0,
+                  }}
+                >
+                  <Box
+                    component="iframe"
+                    src={message.file.url}
+                    title="Xem trước PDF"
+                    sx={{
+                      display: 'block',
+                      width: '100%',
+                      height: { xs: 260, sm: 360 },
+                      border: 'none',
+                      bgcolor: 'background.paper',
+                    }}
+                  />
+                </Box>
+                <Link
+                  href={message.file.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  underline="hover"
+                  sx={{
+                    fontSize: '0.75rem',
+                    alignSelf: 'flex-start',
+                    color: 'inherit',
+                    opacity: 0.88,
+                  }}
+                >
+                  Mở trong tab mới
+                </Link>
+              </Stack>
+            ) : showVideoPreview ? (
+              <Box
+                component="video"
+                controls
+                playsInline
+                preload="metadata"
+                src={message.file.url}
+                aria-label="Video đính kèm"
+                sx={{
+                  display: 'block',
+                  width: '100%',
+                  maxWidth: '100%',
+                  maxHeight: { xs: 280, sm: 360 },
+                  borderRadius: 1,
+                  bgcolor: isOwnMessage ? 'rgba(0,0,0,0.15)' : 'grey.900',
+                  objectFit: 'contain',
+                }}
+              />
+            ) : (
+              <Link
+                href={message.file.url}
+                target="_blank"
+                rel="noreferrer"
+                underline="always"
+                sx={{ display: 'inline-block', color: 'inherit' }}
+              >
+                <Typography variant="body2" component="span">
+                  {message.file.name}
+                  {message.file.size ? ` (${message.file.size} bytes)` : ''}
+                </Typography>
+              </Link>
+            )}
+          </Box>
         ) : null}
         <Box
           sx={{
