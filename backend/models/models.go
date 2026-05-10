@@ -16,12 +16,21 @@ type Room struct {
 
 // Message represents a chat message
 type Message struct {
-	ID      string       `json:"id" bson:"_id,omitempty"`
-	RoomID  string       `json:"room_id" bson:"room_id"`
-	User    string       `json:"user" bson:"user"`
-	Content string       `json:"content" bson:"content"`
-	File    *MessageFile `json:"file,omitempty" bson:"file,omitempty"`
-	Created int64        `json:"created" bson:"created"`
+	ID      string          `json:"id" bson:"_id,omitempty"`
+	RoomID  string          `json:"room_id" bson:"room_id"`
+	User    string          `json:"user" bson:"user"`
+	Content string          `json:"content" bson:"content"`
+	File    *MessageFile    `json:"file,omitempty" bson:"file,omitempty"`
+	ReplyTo *MessageReplyTo `json:"reply_to,omitempty" bson:"reply_to,omitempty"`
+	Edited  bool            `json:"edited" bson:"edited"`
+	Created int64           `json:"created" bson:"created"`
+	Updated int64           `json:"updated,omitempty" bson:"updated,omitempty"`
+}
+
+type MessageReplyTo struct {
+	ID      string `json:"id" bson:"id"`
+	User    string `json:"user" bson:"user"`
+	Content string `json:"content" bson:"content"`
 }
 
 type MessageFile struct {
@@ -42,14 +51,18 @@ func NewRoom(name, password string) *Room {
 }
 
 // NewMessage creates a new message with current timestamp
-func NewMessage(roomID, user, content string, file *MessageFile) *Message {
+func NewMessage(roomID, user, content string, file *MessageFile, replyTo *MessageReplyTo) *Message {
+	now := time.Now().Unix()
 	return &Message{
 		ID:      NewID("msg"),
 		RoomID:  roomID,
 		User:    user,
 		Content: content,
 		File:    file,
-		Created: time.Now().Unix(),
+		ReplyTo: replyTo,
+		Edited:  false,
+		Created: now,
+		Updated: now,
 	}
 }
 

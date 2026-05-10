@@ -26,6 +26,11 @@ Tai lieu nay tom tat thiet ke ky thuat thuc te cua repo o thoi diem hien tai. No
 - Trach nhiem:
 - render giao dien chat
 - goi hoac tich hop voi backend URL qua `REACT_APP_BACKEND_URL`
+- luu lai cac state chinh cua giao dien sau reload, bao gom username, admin auth state, va trang thai dang o lobby/room access/chat view/admin dashboard
+- route admin login va admin dashboard rieng, tach khoi flow nguoi dung thuong
+- admin dashboard co khu vuc quan ly room va khu vuc quan ly user
+- hien action menu tren tung message theo kieu click-to-open, roi moi cho phep reply/edit/delete
+- chi enable edit/delete cho message do chinh user tao
 - co hook `socket.io-client` de mo phong ket noi realtime o frontend
 
 ### 2.3 MongoDB service
@@ -60,7 +65,21 @@ Truong du lieu dang duoc service ghi:
 - `user`: ten hoac dinh danh nguoi gui
 - `content`: noi dung tin nhan
 - `file`: object metadata gom `name`, `url`, `size`, `content_type` khi co file dinh kem
+- `reply_to`: snapshot toi thieu cua message duoc reply gom `id`, `user`, `content`
+- `edited`: danh dau message da duoc sua
 - `created`: unix timestamp
+- `updated`: unix timestamp cua lan tao hoac sua gan nhat
+
+### 3.3 Collection `users`
+
+Truong du lieu dang duoc service ghi cho tai khoan quan tri:
+
+- `_id`: ID cua user
+- `username`: ten dang nhap
+- `password_hash`: mat khau da hash
+- `role`: `mod` hoac `admin`
+- `created`: unix timestamp
+- `updated`: unix timestamp cua lan gan nhat
 
 ## 4. API Endpoints Hien Co
 
@@ -74,15 +93,45 @@ Tat ca route nam duoi prefix `/api`.
    Nhan JSON room va tao room moi.
 3. `GET /api/rooms/:id`
    Lay room theo `id`.
-4. `DELETE /api/rooms/:id`
+4. `POST /api/rooms/:id/join_room`
+   Join room theo `id` voi `secret` va `user`; frontend co the reuse username da nhap truoc do de di nhanh qua luong join.
+5. `DELETE /api/rooms/:id`
    Xoa room theo `id`.
 
-### 4.2 Messages
+### 4.2 Admin Auth and Users
+
+1. `POST /api/admin/login`
+   Xac thuc bang `username` va `password`, tra ve session hoac token de dung cho cac thao tac quan tri.
+2. `GET /api/admin/me`
+   Tra ve thong tin tai khoan admin dang dang nhap.
+3. `GET /api/admin/users`
+   Tra ve danh sach user quan tri `mod` va `admin`.
+4. `POST /api/admin/users`
+   Tao user moi voi `username`, `password`, va `role` la `mod` hoac `admin`. He thong phai dam bao chi co mot `admin` active tai mot thoi diem.
+5. `DELETE /api/admin/users/:id`
+   Xoa account `mod` hoac `admin` khac, voi rang buoc khong lam vi pham dieu kien chi co mot `admin` active.
+
+### 4.3 Admin Rooms
+
+1. `GET /api/admin/rooms`
+   Tra ve danh sach room cho admin dashboard.
+2. `POST /api/admin/rooms/:id/join_room`
+   Admin vao room bat ky ma khong can secret room, sau khi da xac thuc.
+3. `DELETE /api/admin/rooms/:id`
+   Admin hoac mod xoa bat ky room nao, sau khi da xac thuc.
+4. `DELETE /api/admin/rooms/:id/messages/:messageId`
+   Admin hoac mod xoa bat ky message nao trong room.
+
+### 4.4 Messages
 
 1. `POST /api/rooms/:id/messages`
-   Gui tin nhan vao room `:id`. Backend chap nhan JSON cu hoac `multipart/form-data` gom `user`, `content`, `secret`, va `file` tuy chon.
+   Gui tin nhan vao room `:id`. Backend chap nhan JSON cu hoac `multipart/form-data` gom `user`, `content`, `secret`, `file` tuy chon, va `reply_to_id` tuy chon. Neu co `reply_to_id`, message dich phai thuoc cung room.
 2. `GET /api/rooms/:id/messages`
-   Lay danh sach tin nhan cua room `:id`, sap xep theo `created` tang dan, bao gom metadata file neu co.
+   Lay danh sach tin nhan cua room `:id`, sap xep theo `created` tang dan, bao gom metadata file, reply, va trang thai edited neu co. Frontend render reply nhu mot block rieng, tach ro phan reply preview va phan noi dung chinh.
+3. `PATCH /api/rooms/:id/messages/:messageId`
+   Sua noi dung message trong room `:id`. Request body gom `secret`, `user`, `content`. Backend chi cho phep sua khi secret hop le va `user` trung voi `message.user`.
+4. `DELETE /api/rooms/:id/messages/:messageId`
+   Xoa message trong room `:id`. Request body gom `secret`, `user`. Backend chi cho phep xoa khi secret hop le va `user` trung voi `message.user`. Neu message co file local thi backend co gang xoa file da luu.
 
 ## 5. Environment Variables
 
@@ -94,6 +143,8 @@ Tat ca route nam duoi prefix `/api`.
 ### 5.2 Frontend
 
 - `REACT_APP_BACKEND_URL`: duoc set trong compose thanh `http://localhost:8081`.
+- `REACT_APP_ADMIN_BACKEND_URL`: neu tach rieng admin API, frontend se dung bien nay de goi cac endpoint admin.
+- `REACT_APP_ADMIN_SESSION_KEY`: key localStorage/sessionStorage de giu trang thai admin dang nhap sau reload.
 
 ## 6. Docker Services
 
@@ -123,13 +174,23 @@ Compose hien tai dinh nghia 4 services:
 1. Client goi `POST /api/rooms` de tao phong.
 2. Backend ghi document vao collection `rooms`.
 3. Client goi `GET /api/rooms` hoac `GET /api/rooms/:id` de doc lai du lieu.
+4. Client goi `POST /api/rooms/:id/join_room` voi `user` va `secret`; frontend co the ghi nho username da nhap de reuse trong cac lan quay lai app sau, ke ca sau khi reload.
+5. Admin hoac mod sau khi login co the goi endpoint admin de vao bat ky room nao ma khong can secret room.
+6. Admin hoac mod sau khi login co the xoa bat ky room nao va xoa message trong room.
+7. Admin dashboard co the tai danh sach room rieng tu `GET /api/admin/rooms`.
+8. Chi admin co the quan ly user quan tri qua `GET /api/admin/users` va `POST /api/admin/users`.
 
 ### 7.3 Message flow
 
 1. Client goi `POST /api/rooms/:id/messages` voi `secret` hop le, kem text, file, hoac ca hai.
-2. Neu co file, backend tao thu muc `uploads/` neu chua ton tai, luu file local, va ghi metadata file vao document message.
-3. Backend expose file qua static route `/uploads/*`.
-4. Client goi `GET /api/rooms/:id/messages` de lay lich su tin nhan va render link file.
+2. Neu request co `reply_to_id`, backend doc message dich trong cung room va luu reply snapshot toi thieu vao message moi.
+3. Neu co file, backend tao thu muc `uploads/` neu chua ton tai, luu file local, va ghi metadata file vao document message.
+4. Backend expose file qua static route `/uploads/*`.
+5. Tren frontend, cac action reply/edit/delete chi duoc mo ra sau khi nguoi dung click vao nut action cua message.
+6. Client goi `PATCH /api/rooms/:id/messages/:messageId` de edit message cua chinh minh.
+7. Client goi `DELETE /api/rooms/:id/messages/:messageId` de xoa message cua chinh minh.
+8. Admin/mod goi `DELETE /api/admin/rooms/:id/messages/:messageId` de xoa message bat ky trong room.
+9. Client goi `GET /api/rooms/:id/messages` de lay lich su tin nhan va render text, file, reply preview, va marker edited; message da sua phai hien nhan `edited` ro rang.
 
 ## 8. Gioi Han Hien Tai
 

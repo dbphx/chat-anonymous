@@ -47,20 +47,27 @@ func NewRoomHandler(roomService *services.RoomService, messageService *services.
 	}
 }
 
-// GetRooms retrieves all rooms
+// GetRooms returns paginated rooms (query q, page, limit).
 func (h *RoomHandler) GetRooms(c *gin.Context) {
-	rooms, err := h.roomService.GetRooms()
+	q := parseSearchQuery(c)
+	page, limit := parsePageLimit(c)
+	result, err := h.roomService.SearchRooms(q, page, limit)
 	if err != nil {
 		logrus.Error("Failed to get rooms:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
 		return
 	}
-	responses := make([]roomResponse, 0, len(rooms))
-	for _, room := range rooms {
-		roomCopy := room
+	responses := make([]roomResponse, 0, len(result.Items))
+	for i := range result.Items {
+		roomCopy := result.Items[i]
 		responses = append(responses, toRoomResponse(&roomCopy))
 	}
-	c.JSON(http.StatusOK, responses)
+	c.JSON(http.StatusOK, gin.H{
+		"items": responses,
+		"total": result.Total,
+		"page":  result.Page,
+		"limit": result.Limit,
+	})
 }
 
 // CreateRoom creates a new room
@@ -189,7 +196,7 @@ func NewMessageHandler(service *services.MessageService, roomService *services.R
 func (h *MessageHandler) SendMessage(c *gin.Context) {
 	roomID := c.Param("id")
 
-	message, fileHeader, err := parseMessageRequest(c)
+	message, fileHeader, err := parseMessageRequest(c, true)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -223,8 +230,21 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 		}
 	}
 
-	_, err = h.service.SendMessage(roomID, message.User, message.Content, fileMeta)
+	replyTo, err := h.service.BuildReplyTo(roomID, message.ReplyToID)
 	if err != nil {
+		rollbackUploadedFile(fileMeta)
+		if errors.Is(err, services.ErrMessageNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Reply target not found in room"})
+			return
+		}
+		logrus.Error("Failed to resolve reply target:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+		return
+	}
+
+	_, err = h.service.SendMessage(roomID, message.User, message.Content, fileMeta, replyTo)
+	if err != nil {
+		rollbackUploadedFile(fileMeta)
 		logrus.Error("Failed to send message:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
 		return
@@ -234,23 +254,36 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 }
 
 type sendMessagePayload struct {
-	User    string
-	Content string
-	Secret  string
+	User      string
+	Content   string
+	Secret    string
+	ReplyToID string
 }
 
-func parseMessageRequest(c *gin.Context) (*sendMessagePayload, *multipart.FileHeader, error) {
+type updateMessagePayload struct {
+	User    string `json:"user"`
+	Content string `json:"content"`
+	Secret  string `json:"secret"`
+}
+
+type deleteMessagePayload struct {
+	User   string `json:"user"`
+	Secret string `json:"secret"`
+}
+
+func parseMessageRequest(c *gin.Context, requireUser bool) (*sendMessagePayload, *multipart.FileHeader, error) {
 	payload := &sendMessagePayload{}
 	contentType := c.ContentType()
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		payload.User = strings.TrimSpace(c.PostForm("user"))
 		payload.Content = strings.TrimSpace(c.PostForm("content"))
 		payload.Secret = strings.TrimSpace(c.PostForm("secret"))
+		payload.ReplyToID = strings.TrimSpace(c.PostForm("reply_to_id"))
 
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
 			if errors.Is(err, http.ErrMissingFile) {
-				if payload.User == "" {
+				if requireUser && payload.User == "" {
 					return nil, nil, errors.New("user is required")
 				}
 				if payload.Content == "" {
@@ -272,9 +305,10 @@ func parseMessageRequest(c *gin.Context) (*sendMessagePayload, *multipart.FileHe
 	}
 
 	var body struct {
-		User    string `json:"user"`
-		Content string `json:"content"`
-		Secret  string `json:"secret"`
+		User      string `json:"user"`
+		Content   string `json:"content"`
+		Secret    string `json:"secret"`
+		ReplyToID string `json:"reply_to_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		return nil, nil, err
@@ -282,7 +316,8 @@ func parseMessageRequest(c *gin.Context) (*sendMessagePayload, *multipart.FileHe
 	payload.User = strings.TrimSpace(body.User)
 	payload.Content = strings.TrimSpace(body.Content)
 	payload.Secret = strings.TrimSpace(body.Secret)
-	if payload.User == "" {
+	payload.ReplyToID = strings.TrimSpace(body.ReplyToID)
+	if requireUser && payload.User == "" {
 		return nil, nil, errors.New("user is required")
 	}
 	if payload.Content == "" {
@@ -329,6 +364,34 @@ func saveUploadedFile(fileHeader *multipart.FileHeader) (*models.MessageFile, er
 	}, nil
 }
 
+func removeUploadedFile(fileURL string) error {
+	trimmedURL := strings.TrimSpace(fileURL)
+	if trimmedURL == "" {
+		return nil
+	}
+
+	storedName := strings.TrimPrefix(trimmedURL, "/uploads/")
+	if storedName == "" || storedName == trimmedURL {
+		return nil
+	}
+
+	path := filepath.Join(uploadDir, filepath.Base(storedName))
+	err := os.Remove(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func rollbackUploadedFile(fileMeta *models.MessageFile) {
+	if fileMeta == nil {
+		return
+	}
+	if err := removeUploadedFile(fileMeta.URL); err != nil {
+		logrus.Warn("Failed to rollback uploaded file:", err)
+	}
+}
+
 // GetMessages retrieves messages from a room
 func (h *MessageHandler) GetMessages(c *gin.Context) {
 	roomID := c.Param("id")
@@ -360,4 +423,128 @@ func (h *MessageHandler) GetMessages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, messages)
+}
+
+// UpdateMessage edits a room message owned by the current user.
+func (h *MessageHandler) UpdateMessage(c *gin.Context) {
+	roomID := c.Param("id")
+	messageID := c.Param("messageId")
+
+	var payload updateMessagePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	payload.User = strings.TrimSpace(payload.User)
+	payload.Content = strings.TrimSpace(payload.Content)
+	payload.Secret = strings.TrimSpace(payload.Secret)
+	if payload.Secret == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "secret is required"})
+		return
+	}
+	if payload.User == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user is required"})
+		return
+	}
+
+	_, err := h.roomService.ValidateSecret(roomID, payload.Secret)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidSecret) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid secret"})
+			return
+		}
+		if errors.Is(err, services.ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		return
+	}
+
+	updatedMessage, err := h.service.UpdateMessage(roomID, messageID, payload.User, payload.Content)
+	if err != nil {
+		if errors.Is(err, services.ErrEmptyMessageContent) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+			return
+		}
+		if errors.Is(err, services.ErrMessageNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You can only edit your own messages"})
+			return
+		}
+		if errors.Is(err, services.ErrMessageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
+			return
+		}
+		logrus.Error("Failed to update message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update message"})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedMessage)
+}
+
+// DeleteMessage deletes a room message owned by the current user.
+func (h *MessageHandler) DeleteMessage(c *gin.Context) {
+	roomID := c.Param("id")
+	messageID := c.Param("messageId")
+
+	var payload deleteMessagePayload
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	payload.User = strings.TrimSpace(payload.User)
+	payload.Secret = strings.TrimSpace(payload.Secret)
+	if payload.Secret == "" {
+		payload.Secret = strings.TrimSpace(c.GetHeader(roomSecretHeader))
+	}
+	if payload.Secret == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "secret is required"})
+		return
+	}
+	if payload.User == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user is required"})
+		return
+	}
+
+	_, err := h.roomService.ValidateSecret(roomID, payload.Secret)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidSecret) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid secret"})
+			return
+		}
+		if errors.Is(err, services.ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		return
+	}
+
+	deletedMessage, err := h.service.DeleteMessage(roomID, messageID, payload.User)
+	if err != nil {
+		if errors.Is(err, services.ErrMessageNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own messages"})
+			return
+		}
+		if errors.Is(err, services.ErrMessageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
+			return
+		}
+		logrus.Error("Failed to delete message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete message"})
+		return
+	}
+
+	if deletedMessage.File != nil {
+		if err := removeUploadedFile(deletedMessage.File.URL); err != nil {
+			logrus.Warn("Failed to remove uploaded file:", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Message deleted successfully"})
 }

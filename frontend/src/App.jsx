@@ -1,48 +1,430 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 import ChatView from './views/ChatView';
+import AdminLoginView from './views/AdminLoginView';
+import AdminDashboardView from './views/AdminDashboardView';
+import LobbyView from './views/LobbyView';
+import RoomAccessView from './views/RoomAccessView';
+import { parseJsonResponse } from './utils/parseJsonResponse';
+import { normalizePagedResponse } from './utils/pagedList';
 
-const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8081';
+function AdminSessionLoading() {
+  return (
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
+      <Stack alignItems="center" spacing={2}>
+        <CircularProgress />
+        <Typography color="text.secondary">Đang kiểm tra phiên đăng nhập…</Typography>
+      </Stack>
+    </Box>
+  );
+}
 
-function App() {
-  const [userName, setUserName] = useState('');
-  const [draftUserName, setDraftUserName] = useState('');
-  const [rooms, setRooms] = useState([]);
-  const [selectedRoom, setSelectedRoom] = useState(null);
-  const [joinSecret, setJoinSecret] = useState('');
-  const [newRoomName, setNewRoomName] = useState('');
-  const [newRoomSecret, setNewRoomSecret] = useState('');
-  const [joinedRoom, setJoinedRoom] = useState(null);
-  const [roomSecret, setRoomSecret] = useState('');
-  const [error, setError] = useState('');
-  const [isBusy, setIsBusy] = useState(false);
+const DEFAULT_ROOM_PAGE_LIMIT = 20;
 
-  const loadRooms = async () => {
-    const response = await fetch(`${API_BASE_URL}/api/rooms`);
-    const data = await response.json();
+const resolveApiBaseUrl = () => {
+  const fromEnv = process.env.REACT_APP_BACKEND_URL;
+  if (fromEnv != null && String(fromEnv).trim() !== '') {
+    return String(fromEnv).replace(/\/$/, '');
+  }
+  if (process.env.NODE_ENV === 'development') {
+    return '';
+  }
+  return 'http://localhost:8081';
+};
 
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to load rooms');
+const API_BASE_URL = resolveApiBaseUrl();
+const APP_STORAGE_KEY = 'chat-anonymous:app-state';
+const ADMIN_STORAGE_KEY = 'chat-anonymous:admin-auth';
+
+const parsePathname = (pathname) => {
+  const segments = pathname.split('/').filter(Boolean);
+
+  if (segments[0] === 'admin') {
+    if (segments[1] === 'login') {
+      return { view: 'admin-login', roomId: null };
     }
 
-    setRooms(data);
+    if (segments[1] === 'rooms' && segments[2]) {
+      return { view: 'admin-room', roomId: segments[2] };
+    }
+
+    return { view: 'admin-dashboard', roomId: null };
+  }
+
+  if (segments[0] === 'room' && segments[1]) {
+    return { view: 'room', roomId: segments[1] };
+  }
+
+  if (segments[0] === 'chat' && segments[1]) {
+    return { view: 'chat', roomId: segments[1] };
+  }
+
+  return { view: 'home', roomId: null };
+};
+
+const getRoomById = (rooms, roomId) => rooms.find((room) => room && room.id === roomId) || null;
+
+const readStoredAppState = () => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(APP_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const readStoredAdminAuth = () => {
+  if (typeof window === 'undefined') {
+    return { token: '', user: null };
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ADMIN_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object'
+      ? { token: parsed.token || '', user: parsed.user || null }
+      : { token: '', user: null };
+  } catch {
+    return { token: '', user: null };
+  }
+};
+
+const getStoredUserRoute = (storedState) => {
+  if (storedState.joinedRoom?.id) {
+    return `/chat/${storedState.joinedRoom.id}`;
+  }
+
+  if (storedState.selectedRoom?.id) {
+    return `/room/${storedState.selectedRoom.id}`;
+  }
+
+  return '/';
+};
+
+const getInitialPathname = () => {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+
+  const currentPath = window.location.pathname;
+  const currentRoute = parsePathname(currentPath);
+  if (currentRoute.view !== 'home') {
+    return currentPath;
+  }
+
+  return getStoredUserRoute(readStoredAppState());
+};
+
+const getInitialAppState = (pathname) => {
+  const storedState = readStoredAppState();
+  const pathnameRoute = parsePathname(pathname);
+  const storedRooms = Array.isArray(storedState.rooms) ? storedState.rooms : [];
+  const storedSelectedRoom = storedState.selectedRoom || null;
+  const storedJoinedRoom = storedState.joinedRoom || null;
+  const route = pathnameRoute.view === 'home'
+    ? (storedJoinedRoom
+      ? { view: 'chat', roomId: storedJoinedRoom.id }
+      : storedSelectedRoom
+        ? { view: 'room', roomId: storedSelectedRoom.id }
+        : { view: 'home', roomId: null })
+    : pathnameRoute;
+  const candidateRooms = [storedJoinedRoom, storedSelectedRoom, ...storedRooms];
+  const resolveRoom = (roomId) => getRoomById(candidateRooms, roomId) || (roomId ? { id: roomId, name: roomId } : null);
+  const resolvedRoom = route.roomId ? resolveRoom(route.roomId) : null;
+
+  return {
+    userName: storedState.userName || '',
+    draftUserName: storedState.draftUserName || '',
+    rooms: storedRooms,
+    selectedRoom: route.view === 'home' ? null : resolvedRoom,
+    joinSecret: route.view === 'room' ? (storedState.joinSecret || '') : '',
+    newRoomName: storedState.newRoomName || '',
+    newRoomSecret: storedState.newRoomSecret || '',
+    joinedRoom: route.view === 'chat' ? resolvedRoom : null,
+    roomSecret: route.view === 'chat' ? (storedState.roomSecret || '') : '',
+  };
+};
+
+function App() {
+  const [pathname, setPathname] = useState(() => getInitialPathname());
+  const [initialState] = useState(() => getInitialAppState(pathname));
+  const [userName, setUserName] = useState(initialState.userName);
+  const [draftUserName, setDraftUserName] = useState(initialState.draftUserName);
+  const [rooms, setRooms] = useState(initialState.rooms);
+  const [selectedRoom, setSelectedRoom] = useState(initialState.selectedRoom);
+  const [joinSecret, setJoinSecret] = useState(initialState.joinSecret);
+  const [newRoomName, setNewRoomName] = useState(initialState.newRoomName);
+  const [newRoomSecret, setNewRoomSecret] = useState(initialState.newRoomSecret);
+  const [joinedRoom, setJoinedRoom] = useState(initialState.joinedRoom);
+  const [roomSecret, setRoomSecret] = useState(initialState.roomSecret);
+  const [userError, setUserError] = useState('');
+  const [userBusy, setUserBusy] = useState(false);
+  const [roomPageMeta, setRoomPageMeta] = useState({
+    total: 0,
+    page: 1,
+    limit: DEFAULT_ROOM_PAGE_LIMIT,
+  });
+  const [adminAuth, setAdminAuth] = useState(() => readStoredAdminAuth());
+  const [adminUser, setAdminUser] = useState(() => readStoredAdminAuth().user);
+  const [isAdminChecking, setIsAdminChecking] = useState(Boolean(readStoredAdminAuth().token));
+
+  const route = parsePathname(pathname);
+
+  const navigate = (nextPath, replace = false) => {
+    if (typeof window === 'undefined' || window.location.pathname === nextPath) {
+      return;
+    }
+
+    const method = replace ? 'replaceState' : 'pushState';
+    window.history[method]({}, '', nextPath);
+    setPathname(nextPath);
+  };
+
+  const clearAdminAuth = (redirect = true) => {
+    setAdminAuth({ token: '', user: null });
+    setAdminUser(null);
+    try {
+      window.localStorage.removeItem(ADMIN_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors.
+    }
+    if (redirect) {
+      navigate('/admin/login', true);
+    }
   };
 
   useEffect(() => {
-    loadRooms().catch((loadError) => {
-      setError(loadError.message);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(APP_STORAGE_KEY, JSON.stringify({
+        userName,
+        draftUserName,
+        rooms,
+        selectedRoom,
+        joinSecret,
+        newRoomName,
+        newRoomSecret,
+        joinedRoom,
+        roomSecret,
+      }));
+    } catch {
+      // Ignore storage quota or privacy mode failures.
+    }
+  }, [
+    userName,
+    draftUserName,
+    rooms,
+    selectedRoom,
+    joinSecret,
+    newRoomName,
+    newRoomSecret,
+    joinedRoom,
+    roomSecret,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(adminAuth));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [adminAuth]);
+
+  const fetchRoomsPage = useCallback(async ({ q = '', page = 1, limit = DEFAULT_ROOM_PAGE_LIMIT }) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
+    const trimmed = String(q).trim();
+    if (trimmed) {
+      params.set('q', trimmed);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/rooms?${params.toString()}`);
+    const data = await parseJsonResponse(response);
+
+    if (!response.ok) {
+      throw new Error((data && data.error) || 'Failed to load rooms');
+    }
+
+    const normalized = normalizePagedResponse(data);
+    setRooms(normalized.items);
+    setRoomPageMeta({
+      total: normalized.total,
+      page: normalized.page,
+      limit: normalized.limit,
     });
   }, []);
 
-  const handleRefreshRooms = async () => {
-    setIsBusy(true);
+  useEffect(() => {
+    const view = parsePathname(pathname).view;
+    if (view !== 'home') {
+      return undefined;
+    }
 
+    let cancelled = false;
+    setUserBusy(true);
+    fetchRoomsPage({ q: '', page: 1, limit: DEFAULT_ROOM_PAGE_LIMIT })
+      .then(() => {
+        if (!cancelled) {
+          setUserError('');
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setUserError(loadError.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setUserBusy(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      setUserBusy(false);
+    };
+  }, [pathname, fetchRoomsPage]);
+
+  useEffect(() => {
+    setSelectedRoom((currentRoom) => {
+      if (!currentRoom) {
+        return currentRoom;
+      }
+
+      return getRoomById(rooms, currentRoom.id) || currentRoom;
+    });
+
+    setJoinedRoom((currentRoom) => {
+      if (!currentRoom) {
+        return currentRoom;
+      }
+
+      return getRoomById(rooms, currentRoom.id) || currentRoom;
+    });
+  }, [rooms]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handlePopState = () => {
+      const nextPath = window.location.pathname;
+      const nextRoute = parsePathname(nextPath);
+      const storedState = readStoredAppState();
+      setPathname(nextPath);
+
+      if (nextRoute.view === 'home') {
+        setSelectedRoom(null);
+        setJoinedRoom(null);
+        setJoinSecret('');
+        setUserError('');
+        return;
+      }
+
+      if (nextRoute.view === 'room' || nextRoute.view === 'chat') {
+        const roomCandidates = [
+          ...rooms,
+          selectedRoom,
+          joinedRoom,
+          storedState.selectedRoom,
+          storedState.joinedRoom,
+        ];
+        const resolveRoom = (roomId) => getRoomById(roomCandidates, roomId) || (roomId ? { id: roomId, name: roomId } : null);
+        const room = resolveRoom(nextRoute.roomId);
+
+        setSelectedRoom(room);
+        setJoinSecret('');
+        setUserError('');
+
+        if (nextRoute.view === 'chat') {
+          setJoinedRoom(room);
+          setRoomSecret(storedState.roomSecret || roomSecret);
+        } else {
+          setJoinedRoom(null);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [joinedRoom, roomSecret, rooms, selectedRoom]);
+
+  useEffect(() => {
+    const validateAdminSession = async () => {
+      if (!adminAuth.token) {
+        setIsAdminChecking(false);
+        return;
+      }
+
+      setIsAdminChecking(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/admin/me`, {
+          headers: { Authorization: `Bearer ${adminAuth.token}` },
+        });
+        const data = await parseJsonResponse(response);
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Invalid session');
+        }
+
+        setAdminUser(data);
+        setAdminAuth((currentAuth) => ({ ...currentAuth, user: data }));
+      } catch {
+        clearAdminAuth(route.view.startsWith('admin'));
+      } finally {
+        setIsAdminChecking(false);
+      }
+    };
+
+    validateAdminSession();
+  }, []);
+
+  useEffect(() => {
+    if (!route.view.startsWith('admin')) {
+      return;
+    }
+
+    if (!adminAuth.token && route.view !== 'admin-login') {
+      navigate('/admin/login', true);
+    }
+
+    if (adminAuth.token && route.view === 'admin-login' && !isAdminChecking) {
+      navigate('/admin', true);
+    }
+  }, [adminAuth.token, isAdminChecking, pathname, route.view]);
+
+  const handleFetchRoomsPage = async (opts) => {
+    setUserBusy(true);
     try {
-      await loadRooms();
-      setError('');
+      await fetchRoomsPage({
+        q: opts.q ?? '',
+        page: opts.page ?? 1,
+        limit: opts.limit ?? roomPageMeta.limit,
+      });
+      setUserError('');
     } catch (loadError) {
-      setError(loadError.message);
+      setUserError(loadError.message);
     } finally {
-      setIsBusy(false);
+      setUserBusy(false);
     }
   };
 
@@ -51,24 +433,33 @@ function App() {
     const trimmedName = draftUserName.trim();
 
     if (!trimmedName) {
-      setError('User name is required');
+      setUserError('User name is required');
       return;
     }
 
     setUserName(trimmedName);
-    setError('');
+    setUserError('');
+  };
+
+  const handleChangeName = () => {
+    setUserName('');
+    setSelectedRoom(null);
+    setJoinedRoom(null);
+    setJoinSecret('');
+    setUserError('');
+    navigate('/');
   };
 
   const handleCreateRoom = async (event) => {
     event.preventDefault();
 
     if (!newRoomName.trim() || !newRoomSecret.trim()) {
-      setError('Room name and secret are required');
+      setUserError('Room name and secret are required');
       return;
     }
 
-    setIsBusy(true);
-    setError('');
+    setUserBusy(true);
+    setUserError('');
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/rooms`, {
@@ -79,7 +470,7 @@ function App() {
           password: newRoomSecret.trim(),
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to create room');
@@ -87,12 +478,14 @@ function App() {
 
       setNewRoomName('');
       setNewRoomSecret('');
-      setRooms((currentRooms) => [...currentRooms, data]);
       setSelectedRoom(data);
+      setJoinedRoom(null);
+      setJoinSecret('');
+      navigate(`/room/${data.id}`);
     } catch (createError) {
-      setError(createError.message);
+      setUserError(createError.message);
     } finally {
-      setIsBusy(false);
+      setUserBusy(false);
     }
   };
 
@@ -100,25 +493,25 @@ function App() {
     event.preventDefault();
 
     if (!selectedRoom) {
-      setError('Select a room first');
+      setUserError('Select a room first');
       return;
     }
 
     if (!joinSecret.trim()) {
-      setError('Room secret is required');
+      setUserError('Room secret is required');
       return;
     }
 
-    setIsBusy(true);
-    setError('');
+    setUserBusy(true);
+    setUserError('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/rooms/${selectedRoom.id}/join`, {
+      const response = await fetch(`${API_BASE_URL}/api/rooms/${selectedRoom.id}/join_room`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ secret: joinSecret.trim() }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to join room');
@@ -127,157 +520,199 @@ function App() {
       setJoinedRoom(data);
       setRoomSecret(joinSecret.trim());
       setJoinSecret('');
+      navigate(`/chat/${data.id}`);
     } catch (joinError) {
-      setError(joinError.message);
+      setUserError(joinError.message);
     } finally {
-      setIsBusy(false);
+      setUserBusy(false);
     }
   };
 
   const handleLeaveRoom = () => {
+    const room = joinedRoom || selectedRoom;
+
     setJoinedRoom(null);
-    setSelectedRoom(null);
+    setSelectedRoom(room);
     setJoinSecret('');
-    setRoomSecret('');
-    setError('');
+    setUserError('');
+
+    if (room) {
+      navigate(`/room/${room.id}`);
+    }
   };
 
   const handleBackToLobby = () => {
     setSelectedRoom(null);
+    setJoinedRoom(null);
     setJoinSecret('');
-    setError('');
+    setUserError('');
+    navigate('/');
   };
 
   const handleSelectRoom = (room) => {
     setSelectedRoom(room);
+    setJoinedRoom(null);
     setJoinSecret('');
-    setError('');
+    setUserError('');
+    navigate(`/room/${room.id}`);
   };
 
-  if (joinedRoom) {
+  const handleAdminLogin = async ({ username, password }) => {
+    setUserBusy(true);
+    setUserError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await parseJsonResponse(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to login');
+      }
+
+      setAdminAuth({ token: data.token, user: data.user });
+      setAdminUser(data.user);
+      navigate('/admin', true);
+    } catch (loginError) {
+      setUserError(loginError.message);
+    } finally {
+      setUserBusy(false);
+    }
+  };
+
+  const handleAdminLogout = () => {
+    clearAdminAuth(true);
+  };
+
+  const handleAdminUnauthorized = () => {
+    clearAdminAuth(true);
+  };
+
+  const resolveRoomForRoute = (roomId) => getRoomById(rooms, roomId) || (roomId ? { id: roomId, name: roomId } : null);
+
+  if (route.view === 'admin-login') {
     return (
-      <div className="app-shell">
-        <ChatView
-          apiBaseUrl={API_BASE_URL}
-          room={joinedRoom}
-          secret={roomSecret}
-          userName={userName}
-          onLeave={handleLeaveRoom}
-        />
-      </div>
+      <AdminLoginView
+        onLogin={handleAdminLogin}
+        onBackHome={() => navigate('/')}
+        isLoading={userBusy || isAdminChecking}
+        error={userError}
+      />
     );
   }
 
-  const isInLobby = Boolean(userName) && !selectedRoom;
-  const isInRoomAccess = Boolean(userName) && Boolean(selectedRoom);
+  if (route.view === 'admin-dashboard') {
+    if (isAdminChecking) {
+      return <AdminSessionLoading />;
+    }
+
+    if (!adminAuth.token) {
+      return (
+        <AdminLoginView
+          onLogin={handleAdminLogin}
+          onBackHome={() => navigate('/')}
+          isLoading={userBusy}
+          error={userError}
+        />
+      );
+    }
+
+    return (
+      <AdminDashboardView
+        apiBaseUrl={API_BASE_URL}
+        authToken={adminAuth.token}
+        adminUser={adminUser}
+        onOpenRoom={(room) => navigate(`/admin/rooms/${room.id}`)}
+        onLogout={handleAdminLogout}
+        onUnauthorized={handleAdminUnauthorized}
+      />
+    );
+  }
+
+  if (route.view === 'admin-room') {
+    if (isAdminChecking) {
+      return <AdminSessionLoading />;
+    }
+
+    if (!adminAuth.token) {
+      return (
+        <AdminLoginView
+          onLogin={handleAdminLogin}
+          onBackHome={() => navigate('/')}
+          isLoading={userBusy}
+          error={userError}
+        />
+      );
+    }
+
+    const room = resolveRoomForRoute(route.roomId);
+
+    return (
+      <ChatView
+        apiBaseUrl={API_BASE_URL}
+        room={room}
+        userName={adminUser?.username || 'admin'}
+        onLeave={() => navigate('/admin')}
+        mode="admin"
+        adminToken={adminAuth.token}
+        adminUser={adminUser}
+        onUnauthorized={handleAdminUnauthorized}
+      />
+    );
+  }
+
+  if (joinedRoom) {
+    return (
+      <ChatView
+        apiBaseUrl={API_BASE_URL}
+        room={joinedRoom}
+        secret={roomSecret}
+        userName={userName}
+        onLeave={handleLeaveRoom}
+      />
+    );
+  }
+
+  const lobbyProps = {
+    userName,
+    draftUserName,
+    setDraftUserName,
+    onSetUserName: handleSetUserName,
+    rooms,
+    roomPageMeta,
+    onFetchRoomsPage: handleFetchRoomsPage,
+    onSelectRoom: handleSelectRoom,
+    newRoomName,
+    setNewRoomName,
+    newRoomSecret,
+    setNewRoomSecret,
+    onCreateRoom: handleCreateRoom,
+    userBusy,
+    userError,
+    onAdminLogin: () => navigate('/admin/login'),
+    onChangeName: handleChangeName,
+  };
+
+  if (!userName || !selectedRoom) {
+    return <LobbyView {...lobbyProps} />;
+  }
 
   return (
-    <div className="app-shell">
-      <div className="lobby-card">
-        <h1>Anonymous Chat</h1>
-        <p className="subtitle">Choose a room first, then enter its secret to access the chat.</p>
-        {error ? <div className="error-banner">{error}</div> : null}
-
-        {!userName ? (
-          <form className="panel" onSubmit={handleSetUserName}>
-            <h2>Your Name</h2>
-            <input
-              value={draftUserName}
-              onChange={(event) => setDraftUserName(event.target.value)}
-              placeholder="Enter your name"
-            />
-            <button type="submit">Continue</button>
-          </form>
-        ) : null}
-
-        {isInLobby ? (
-          <>
-            <div className="panel panel-inline">
-              <div>
-                <strong>User:</strong> {userName}
-              </div>
-              <button type="button" onClick={() => setUserName('')}>Change name</button>
-            </div>
-
-            <div className="panel">
-              <div className="panel-header">
-                <h2>Rooms</h2>
-                <button type="button" onClick={handleRefreshRooms} disabled={isBusy}>
-                  Refresh rooms
-                </button>
-              </div>
-              <div className="room-list">
-                {rooms.map((room) => (
-                  <button
-                    className="room-option"
-                    key={room.id}
-                    type="button"
-                    onClick={() => handleSelectRoom(room)}
-                  >
-                    <span className="room-option-content">
-                      <strong>{room.name}</strong>
-                      <code>{room.id}</code>
-                    </span>
-                    <span className="room-option-action">Enter room</span>
-                  </button>
-                ))}
-                {rooms.length === 0 ? <div className="empty-state">No rooms yet.</div> : null}
-              </div>
-            </div>
-
-            <form className="panel" onSubmit={handleCreateRoom}>
-              <h2>Create Room</h2>
-              <input
-                value={newRoomName}
-                onChange={(event) => setNewRoomName(event.target.value)}
-                placeholder="Room name"
-                disabled={isBusy}
-              />
-              <input
-                value={newRoomSecret}
-                onChange={(event) => setNewRoomSecret(event.target.value)}
-                placeholder="Secret"
-                type="password"
-                disabled={isBusy}
-              />
-              <button type="submit" disabled={isBusy}>Create room</button>
-            </form>
-          </>
-        ) : null}
-
-        {isInRoomAccess ? (
-          <>
-            <div className="panel panel-inline">
-              <div>
-                <strong>User:</strong> {userName}
-              </div>
-              <button type="button" onClick={() => setUserName('')}>Change name</button>
-            </div>
-
-            <form className="panel" onSubmit={handleJoinRoom}>
-              <h2>Enter Room</h2>
-              <div className="room-access-summary">
-                <div><strong>Room:</strong> {selectedRoom.name}</div>
-                <div><strong>Room ID:</strong> <code>{selectedRoom.id}</code></div>
-              </div>
-              <input
-                value={joinSecret}
-                onChange={(event) => setJoinSecret(event.target.value)}
-                placeholder="Enter room secret"
-                type="password"
-                disabled={isBusy}
-              />
-              <div className="action-row">
-                <button type="button" className="button-secondary" onClick={handleBackToLobby} disabled={isBusy}>
-                  Back to room list
-                </button>
-                <button type="submit" disabled={isBusy}>Enter chat</button>
-              </div>
-            </form>
-          </>
-        ) : null}
-      </div>
-    </div>
+    <RoomAccessView
+      userName={userName}
+      selectedRoom={selectedRoom}
+      joinSecret={joinSecret}
+      setJoinSecret={setJoinSecret}
+      userBusy={userBusy}
+      userError={userError}
+      onJoinRoom={handleJoinRoom}
+      onBackToLobby={handleBackToLobby}
+      onChangeName={handleChangeName}
+      onAdminLogin={() => navigate('/admin/login')}
+    />
   );
 }
 
