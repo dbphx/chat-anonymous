@@ -47,6 +47,13 @@ docker-compose up --build
 - Backend API: http://localhost:8081/api
 - MongoDB trong compose: `mongo:27017`
 - Redis host port: `localhost:6380`
+- **MongoDB UI (mongo-express):** http://localhost:8082 — Basic Auth: `MONGO_EXPRESS_USER` / `MONGO_EXPRESS_PASSWORD` (mac dinh `admin` / `changeme` trong file `.env` hoac bien moi truong)
+
+Khoi dong hoac cap nhat UI:
+
+```bash
+docker compose up -d mongo mongo-express
+```
 
 ## Bien moi truong hien tai
 
@@ -58,6 +65,10 @@ docker-compose up --build
 ### Frontend
 
 - `REACT_APP_BACKEND_URL` - URL backend public cho frontend, dang duoc set thanh `http://localhost:8081`
+
+### MongoDB UI (mongo-express)
+
+- `MONGO_EXPRESS_USER` / `MONGO_EXPRESS_PASSWORD` — dang nhap Basic Auth cho http://localhost:8082
 
 ## API hien co
 

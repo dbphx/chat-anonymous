@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -17,8 +16,8 @@ import (
 func CachedMinIOImage() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rel := strings.TrimPrefix(c.Param("filepath"), "/")
-		key := filepath.Base(rel)
-		if key == "" || key == "." || strings.Contains(rel, "..") {
+		key, ok := storage.WebPathToObjectKey(rel)
+		if !ok {
 			c.Status(http.StatusNotFound)
 			return
 		}

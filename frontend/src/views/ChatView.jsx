@@ -64,12 +64,24 @@ const rewriteMinioImageToCachedProxy = (apiBaseUrl, file, resolvedUrl) => {
       return resolvedUrl;
     }
     const tail = u.pathname.slice(idx + marker.length).replace(/^\/+/, '');
-    const key = tail.split('/').filter(Boolean).pop();
-    if (!key || decodeURIComponent(key).includes('..')) {
+    const segments = tail.split('/').filter(Boolean);
+    if (segments.length === 0) {
       return resolvedUrl;
     }
+    for (const s of segments) {
+      let dec = s;
+      try {
+        dec = decodeURIComponent(s);
+      } catch {
+        // giữ nguyên
+      }
+      if (dec.includes('..')) {
+        return resolvedUrl;
+      }
+    }
     const base = apiBaseUrl.replace(/\/$/, '');
-    return `${base}/api/media/image/${encodeURIComponent(key)}`;
+    const encodedPath = segments.map((seg) => encodeURIComponent(seg)).join('/');
+    return `${base}/api/media/image/${encodedPath}`;
   } catch {
     return resolvedUrl;
   }

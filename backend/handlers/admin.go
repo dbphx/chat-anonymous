@@ -375,7 +375,7 @@ func (h *AdminHandler) SendMessage(c *gin.Context) {
 
 	var fileMeta *models.MessageFile
 	if fileHeader != nil {
-		fileMeta, err = saveUploadedFile(fileHeader)
+		fileMeta, err = saveUploadedFile(c.Param("id"), fileHeader)
 		if err != nil {
 			logrus.Error("Failed to save uploaded file for admin message:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file"})

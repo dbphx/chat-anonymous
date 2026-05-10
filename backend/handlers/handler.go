@@ -312,7 +312,7 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 
 	var fileMeta *models.MessageFile
 	if fileHeader != nil {
-		fileMeta, err = saveUploadedFile(fileHeader)
+		fileMeta, err = saveUploadedFile(roomID, fileHeader)
 		if err != nil {
 			logrus.Error("Failed to save uploaded file:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save uploaded file"})
@@ -422,8 +422,8 @@ func parseMessageRequest(c *gin.Context, requireUser bool) (*sendMessagePayload,
 	return payload, nil, nil
 }
 
-func saveUploadedFile(fileHeader *multipart.FileHeader) (*models.MessageFile, error) {
-	return storage.SaveMultipartFile(fileHeader)
+func saveUploadedFile(roomID string, fileHeader *multipart.FileHeader) (*models.MessageFile, error) {
+	return storage.SaveMultipartFile(roomID, fileHeader)
 }
 
 func removeUploadedFile(fileURL string) error {

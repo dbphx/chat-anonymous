@@ -10,6 +10,7 @@ import (
 
 	"chat-anonymous/backend/cache"
 	"chat-anonymous/backend/httpcache"
+
 	"github.com/gin-gonic/gin"
 	"golang.org/x/text/unicode/norm"
 )
@@ -51,25 +52,31 @@ func ginServeCachedBytes(c *gin.Context, blob []byte, ct string) {
 // ServeUploadsFromDir phục vụ file local; ảnh nhỏ được cache Redis (REDIS_ADDR).
 func ServeUploadsFromDir(uploadDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rel := c.Param("filepath")
-		rel = strings.TrimPrefix(rel, "/")
-		name := filepath.Base(rel)
+		rel := strings.TrimPrefix(c.Param("filepath"), "/")
+		absPath, cacheKey, name, err := resolveLocalUploadPath(uploadDir, rel)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		if name == "." || name == "" {
 			c.Status(http.StatusNotFound)
 			return
 		}
 
 		if cache.Enabled() && isImageBasename(name) {
-			if blob, ct, ok := cache.GetImageBlob(name); ok {
+			if blob, ct, ok := cache.GetImageBlob(cacheKey); ok {
 				ginServeCachedBytes(c, blob, ct)
 				return
 			}
 		}
 
-		f, err := openUploadWithUnicodeFallback(uploadDir, name)
+		f, err := os.Open(absPath)
 		if err != nil {
-			c.Status(http.StatusNotFound)
-			return
+			f, err = openUploadWithUnicodeFallback(filepath.Dir(absPath), filepath.Base(absPath))
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
 		}
 
 		fi, err := f.Stat()
@@ -90,15 +97,18 @@ func ServeUploadsFromDir(uploadDir string) gin.HandlerFunc {
 			if errRead == nil && int64(len(body)) == size {
 				ct := http.DetectContentType(body)
 				if strings.HasPrefix(ct, "image/") {
-					cache.SetImageBlob(name, body, ct)
+					cache.SetImageBlob(cacheKey, body, ct)
 					ginServeCachedBytes(c, body, ct)
 					return
 				}
 			}
-			f, err = openUploadWithUnicodeFallback(uploadDir, name)
+			f, err = os.Open(absPath)
 			if err != nil {
-				c.Status(http.StatusNotFound)
-				return
+				f, err = openUploadWithUnicodeFallback(filepath.Dir(absPath), filepath.Base(absPath))
+				if err != nil {
+					c.Status(http.StatusNotFound)
+					return
+				}
 			}
 			defer f.Close()
 			fi, err = f.Stat()
