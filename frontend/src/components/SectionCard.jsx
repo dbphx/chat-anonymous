@@ -63,10 +63,13 @@ const SectionCard = ({
           : { py: 2, px: 2.5 }),
         borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
         '& .MuiCardHeader-action': {
-          alignSelf: compactHeader ? 'center' : 'flex-start',
+          alignSelf: 'center',
+          display: 'flex',
+          alignItems: 'center',
           m: 0,
-          mr: -0.5,
-          pt: compactHeader ? 0 : 0.25,
+          '& .MuiIconButton-root': {
+            flexShrink: 0,
+          },
         },
       }}
     />

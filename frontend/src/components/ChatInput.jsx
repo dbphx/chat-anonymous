@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
-import Button from '@mui/material/Button';
+import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import Popover from '@mui/material/Popover';
 import Typography from '@mui/material/Typography';
@@ -10,6 +10,9 @@ import Chip from '@mui/material/Chip';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import SendIcon from '@mui/icons-material/Send';
+import CloseIcon from '@mui/icons-material/Close';
+import SaveIcon from '@mui/icons-material/Save';
+import { iconOutlinedSoft, iconPrimaryFilled, iconPrimaryFilledDisabled } from '../utils/iconSx';
 
 const EMOJI_PRESETS = ['🙂', '😂', '👍', '❤️', '🔥'];
 
@@ -180,57 +183,91 @@ const ChatInput = ({
         </Box>
       </Popover>
 
-      <Stack spacing={1.5}>
+      <Stack spacing={1.25}>
         {replyTarget ? (
-          <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1} sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+          <Stack
+            direction="row"
+            alignItems="flex-start"
+            justifyContent="space-between"
+            spacing={1}
+            sx={{
+              p: 1.5,
+              bgcolor: 'action.hover',
+              borderRadius: 1.5,
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="subtitle2">
-                Replying to {replyTarget.user || 'Anonymous'}
+              <Typography variant="subtitle2" fontWeight={700}>
+                Trả lời {replyTarget.user || 'Ẩn danh'}
               </Typography>
-              <Typography variant="body2" color="text.secondary" noWrap>
-                {replyTarget.content || '[Attachment]'}
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.25 }}>
+                {replyTarget.content || '[Đính kèm]'}
               </Typography>
             </Box>
-            <Button size="small" variant="outlined" onClick={onCancelReply} disabled={isLoading}>
-              Cancel
-            </Button>
+            <Tooltip title="Hủy trả lời">
+              <IconButton size="small" onClick={onCancelReply} disabled={isLoading} aria-label="Hủy trả lời" sx={iconOutlinedSoft}>
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
         ) : null}
 
         {isEditing ? (
-          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ p: 1.5, bgcolor: 'warning.light', borderRadius: 1 }}>
-            <Typography variant="subtitle2">Editing message</Typography>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => {
-                resetComposer();
-                onCancelEdit();
-              }}
-              disabled={isLoading}
-            >
-              Cancel
-            </Button>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={1}
+            sx={{
+              p: 1.5,
+              bgcolor: 'warning.light',
+              borderRadius: 1.5,
+              border: '1px solid',
+              borderColor: 'warning.dark',
+              opacity: 0.98,
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={700} color="warning.dark">
+              Đang chỉnh sửa tin nhắn
+            </Typography>
+            <Tooltip title="Hủy chỉnh sửa">
+              <IconButton
+                size="small"
+                onClick={() => {
+                  resetComposer();
+                  onCancelEdit();
+                }}
+                disabled={isLoading}
+                aria-label="Hủy chỉnh sửa"
+                sx={iconOutlinedSoft}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
         ) : null}
 
-        <Stack direction="row" spacing={1} alignItems="flex-end">
+        <Stack direction="row" spacing={{ xs: 0.75, sm: 1 }} alignItems="flex-end">
           <IconButton
             color="primary"
-            aria-label="Open emoji picker"
+            size="small"
+            aria-label="Chọn emoji"
             aria-expanded={emojiOpen}
             onClick={(event) => setEmojiAnchor(event.currentTarget)}
             disabled={isLoading}
           >
-            <EmojiEmotionsIcon />
+            <EmojiEmotionsIcon fontSize="small" />
           </IconButton>
           <IconButton
             color="primary"
-            aria-label="Attach file"
+            size="small"
+            aria-label="Đính kèm tệp"
             onClick={handleFileButtonClick}
             disabled={isLoading || isEditing}
           >
-            <AttachFileIcon />
+            <AttachFileIcon fontSize="small" />
           </IconButton>
           <input
             ref={fileInputRef}
@@ -262,18 +299,24 @@ const ChatInput = ({
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isEditing ? 'Edit your message...' : 'Nhập tin nhắn của bạn...'}
+              placeholder={isEditing ? 'Sửa nội dung tin nhắn…' : 'Nhập tin nhắn…'}
               disabled={isLoading}
             />
           </Box>
-          <Button
-            variant="contained"
-            endIcon={<SendIcon />}
-            onClick={handleSubmit}
-            disabled={isLoading || (!message.trim() && !selectedFile)}
-          >
-            {isEditing ? 'Save' : 'Send'}
-          </Button>
+          <Tooltip title={isEditing ? 'Lưu' : 'Gửi'}>
+            <span>
+              <IconButton
+                color="primary"
+                size="small"
+                onClick={handleSubmit}
+                disabled={isLoading || (!message.trim() && !selectedFile)}
+                aria-label={isEditing ? 'Lưu tin nhắn' : 'Gửi tin nhắn'}
+                sx={{ ...iconPrimaryFilled, ...iconPrimaryFilledDisabled, width: 40, height: 40 }}
+              >
+                {isEditing ? <SaveIcon fontSize="small" /> : <SendIcon fontSize="small" />}
+              </IconButton>
+            </span>
+          </Tooltip>
         </Stack>
       </Stack>
     </Box>

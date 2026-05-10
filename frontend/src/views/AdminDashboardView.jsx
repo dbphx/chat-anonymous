@@ -3,7 +3,8 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
-import Button from '@mui/material/Button';
+import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import Pagination from '@mui/material/Pagination';
 import MenuItem from '@mui/material/MenuItem';
@@ -16,16 +17,47 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
-import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
+import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
+import LogoutIcon from '@mui/icons-material/Logout';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckIcon from '@mui/icons-material/Check';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import MainNavbar from '../components/MainNavbar';
 import DataTable from '../components/DataTable';
 import SectionCard from '../components/SectionCard';
 import { parseJsonResponse } from '../utils/parseJsonResponse';
 import { normalizePagedResponse, totalPages as computeTotalPages } from '../utils/pagedList';
+import { roomUserCount } from '../utils/roomMeta';
+import {
+  iconPrimaryFilled,
+  iconPrimaryFilledDisabled,
+  iconOutlinedSoft,
+  tableActionOutlined,
+  tableActionDanger,
+  tableActionIconBox,
+  tableActionCellInnerSx,
+} from '../utils/iconSx';
 
 const DEFAULT_PAGE_LIMIT = 20;
 
-const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLogout, onUnauthorized }) => {
+const primarySubmitIconSx = { ...iconPrimaryFilled, ...iconPrimaryFilledDisabled };
+
+const PLACEHOLDER_ICON = { ...tableActionIconBox, visibility: 'hidden', pointerEvents: 'none' };
+
+const AdminDashboardView = ({
+  apiBaseUrl,
+  authToken,
+  adminUser,
+  activeTab,
+  onNavigateTab,
+  onOpenRoom,
+  onLogout,
+  onUnauthorized,
+  onAdminUserUpdated,
+}) => {
   const [rooms, setRooms] = useState([]);
   const [users, setUsers] = useState([]);
   const [roomPageMeta, setRoomPageMeta] = useState({ total: 0, page: 1, limit: DEFAULT_PAGE_LIMIT });
@@ -40,8 +72,12 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('mod');
-  const [segment, setSegment] = useState('rooms');
   const [createUserOpen, setCreateUserOpen] = useState(false);
+  const [editUserOpen, setEditUserOpen] = useState(false);
+  const [editUserId, setEditUserId] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editRole, setEditRole] = useState('mod');
 
   const userSubmittedQueryRef = useRef('');
   const userPageRef = useRef(1);
@@ -141,14 +177,14 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
   }, [fetchRoomsPage]);
 
   useEffect(() => {
-    if (segment !== 'users' || !canManageUsers) {
+    if (activeTab !== 'users' || !canManageUsers) {
       return;
     }
     fetchUsersPage({
       q: userSubmittedQueryRef.current,
       page: userPageRef.current,
     });
-  }, [segment, canManageUsers, fetchUsersPage]);
+  }, [activeTab, canManageUsers, fetchUsersPage]);
 
   const handleRoomSearchSubmit = (event) => {
     event.preventDefault();
@@ -239,6 +275,65 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
     }
   };
 
+  const openEditUser = (user) => {
+    setEditUserId(user.id);
+    setEditUsername(user.username);
+    setEditPassword('');
+    setEditRole(user.role);
+    setEditUserOpen(true);
+    setError('');
+  };
+
+  const handleUpdateUser = async (event) => {
+    event.preventDefault();
+    if (!editUsername.trim()) {
+      setError('Cần có username');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const passwordChanged = Boolean(editPassword.trim());
+      const response = await fetch(`${apiBaseUrl}/api/admin/users/${editUserId}`, {
+        method: 'PATCH',
+        headers: { ...requestHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: editUsername.trim(),
+          password: editPassword,
+          role: editRole,
+        }),
+      });
+      const data = await parseJsonResponse(response);
+
+      if (response.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update user');
+      }
+
+      setEditUserOpen(false);
+      setError('');
+
+      if (passwordChanged && editUserId === adminUser?.id) {
+        onLogout?.();
+        return;
+      }
+
+      await fetchUsersPage({ q: userSubmittedQuery, page: userPageMeta.page });
+      if (data.id === adminUser?.id) {
+        onAdminUserUpdated?.(data);
+      }
+    } catch (updateError) {
+      setError(updateError.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDeleteUser = async (user) => {
     if (!window.confirm(`Delete ${user.username}?`)) {
       return;
@@ -266,12 +361,6 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
     }
   };
 
-  useEffect(() => {
-    if (!canManageUsers && segment === 'users') {
-      setSegment('rooms');
-    }
-  }, [canManageUsers, segment]);
-
   const subtitleChips = (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
       <Typography variant="caption" color="text.secondary">Đăng nhập</Typography>
@@ -287,36 +376,43 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
         collapsedSubtitleHint={[adminUser?.username, adminUser?.role].filter(Boolean).join(' · ')}
         subtitle={subtitleChips}
         tabs={adminTabs}
-        activeTab={segment}
-        onTabChange={setSegment}
+        activeTab={activeTab}
+        onTabChange={onNavigateTab}
         mainClassName="admin-dashboard-layout"
         right={(
-          <Button fullWidth variant="outlined" size="small" onClick={onLogout}>
-            Đăng xuất
-          </Button>
+          <Tooltip title="Đăng xuất">
+            <IconButton size="small" onClick={onLogout} aria-label="Đăng xuất" sx={{ ...iconOutlinedSoft, width: '100%', borderRadius: 1 }}>
+              <LogoutIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         )}
       >
         <Stack spacing={4}>
           {error ? <Alert severity="error">{error}</Alert> : null}
 
-          {segment === 'rooms' ? (
+          {activeTab === 'rooms' ? (
             <Stack spacing={4} role="tabpanel">
-              <SectionCard compactHeader title="Tìm kiếm phòng" subheader="Theo tên hoặc ID phòng">
-                <Stack component="form" direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} onSubmit={handleRoomSearchSubmit}>
+              <SectionCard compactHeader title="Tìm kiếm phòng" subheader="Theo tên phòng">
+                <Stack component="form" direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center" onSubmit={handleRoomSearchSubmit}>
                   <TextField
                     label="Từ khóa"
                     id="admin-room-search"
                     type="search"
+                    size="small"
                     fullWidth
                     value={roomSearchInput}
                     onChange={(event) => setRoomSearchInput(event.target.value)}
-                    placeholder="Theo tên hoặc ID phòng…"
+                    placeholder="Theo tên phòng…"
                     autoComplete="off"
                     disabled={listBusy}
                   />
-                  <Button type="submit" variant="contained" disabled={listBusy} sx={{ flexShrink: 0 }}>
-                    Tìm kiếm
-                  </Button>
+                  <Tooltip title="Tìm kiếm">
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <IconButton type="submit" size="small" disabled={listBusy} aria-label="Tìm kiếm" sx={{ ...primarySubmitIconSx, width: 40, height: 40 }}>
+                        <SearchIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 </Stack>
               </SectionCard>
 
@@ -324,25 +420,43 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
                 <DataTable sx={{ mt: 0 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Tên phòng</TableCell>
-                      <TableCell>Room ID</TableCell>
-                      <TableCell align="right">Thao tác</TableCell>
+                      <TableCell sx={{ py: 1.5 }}>Tên phòng</TableCell>
+                      <TableCell align="center" sx={{ py: 1.5, width: 88 }}>
+                        Người tham gia
+                      </TableCell>
+                      <TableCell align="center" sx={{ py: 1.5, width: 228 }}>
+                        Thao tác
+                      </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {rooms.map((room) => (
-                      <TableRow key={room.id}>
-                        <TableCell><strong>{room.name}</strong></TableCell>
-                        <TableCell><Typography component="span" variant="body2" sx={{ fontFamily: 'monospace' }}>{room.id}</Typography></TableCell>
-                        <TableCell align="right">
-                          <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
-                            <Button size="small" variant="outlined" onClick={() => onOpenRoom(room)}>
-                              Vào phòng
-                            </Button>
-                            <Button size="small" variant="outlined" color="error" onClick={() => handleDeleteRoom(room)}>
-                              Xóa
-                            </Button>
-                          </Stack>
+                      <TableRow key={room.id} hover>
+                        <TableCell sx={{ verticalAlign: 'middle', py: 1.5 }}>
+                          <strong>{room.name}</strong>
+                        </TableCell>
+                        <TableCell align="center" sx={{ verticalAlign: 'middle', py: 1.5, width: 88 }}>
+                          <Typography variant="body2" fontWeight={600} component="span">
+                            {roomUserCount(room)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center" sx={{ py: 1.5, width: 228 }}>
+                          <Box sx={tableActionCellInnerSx}>
+                            <Tooltip title="Vào phòng">
+                              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <IconButton size="small" onClick={() => onOpenRoom(room)} aria-label="Vào phòng" sx={tableActionOutlined}>
+                                  <MeetingRoomIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Tooltip>
+                            <Tooltip title="Xóa phòng">
+                              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <IconButton size="small" color="error" onClick={() => handleDeleteRoom(room)} aria-label="Xóa phòng" sx={tableActionDanger}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Tooltip>
+                          </Box>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -376,14 +490,15 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
             </Stack>
           ) : null}
 
-          {segment === 'users' && canManageUsers ? (
+          {activeTab === 'users' && canManageUsers ? (
             <Stack spacing={4} role="tabpanel">
               <SectionCard compactHeader title="Tìm kiếm người dùng" subheader="Username, role hoặc ID">
-                <Stack component="form" direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} onSubmit={handleUserSearchSubmit}>
+                <Stack component="form" direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center" onSubmit={handleUserSearchSubmit}>
                   <TextField
                     label="Từ khóa"
                     id="admin-user-search"
                     type="search"
+                    size="small"
                     fullWidth
                     value={userSearchInput}
                     onChange={(event) => setUserSearchInput(event.target.value)}
@@ -391,9 +506,13 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
                     autoComplete="off"
                     disabled={listBusy}
                   />
-                  <Button type="submit" variant="contained" disabled={listBusy} sx={{ flexShrink: 0 }}>
-                    Tìm kiếm
-                  </Button>
+                  <Tooltip title="Tìm kiếm">
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <IconButton type="submit" size="small" disabled={listBusy} aria-label="Tìm kiếm" sx={{ ...primarySubmitIconSx, width: 40, height: 40 }}>
+                        <SearchIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 </Stack>
               </SectionCard>
 
@@ -402,15 +521,19 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
                 subheader="Tài khoản quản trị (mod / admin)"
                 titleTypographyProps={{ variant: 'h6', fontWeight: 700 }}
                 headerAction={(
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => setCreateUserOpen(true)}
-                    disabled={listBusy}
-                  >
-                    Tạo user
-                  </Button>
+                  <Tooltip title="Tạo user">
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => setCreateUserOpen(true)}
+                        disabled={listBusy}
+                        aria-label="Tạo user"
+                        sx={{ ...primarySubmitIconSx, width: 36, height: 36 }}
+                      >
+                        <PersonAddIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 )}
               >
                 <DataTable sx={{ mt: 0 }}>
@@ -419,7 +542,7 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
                       <TableCell>Username</TableCell>
                       <TableCell>Role</TableCell>
                       <TableCell>ID</TableCell>
-                      <TableCell align="right">Thao tác</TableCell>
+                      <TableCell align="center" sx={{ py: 1.5, width: 228 }}>Thao tác</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -428,14 +551,27 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
                         <TableCell><strong>{user.username}</strong></TableCell>
                         <TableCell><Chip size="small" label={user.role} color="success" variant="outlined" /></TableCell>
                         <TableCell><Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{user.id}</Typography></TableCell>
-                        <TableCell align="right">
-                          {user.id !== adminUser?.id ? (
-                            <Button size="small" variant="outlined" color="error" onClick={() => handleDeleteUser(user)}>
-                              Xóa
-                            </Button>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">—</Typography>
-                          )}
+                        <TableCell align="center" sx={{ py: 1.5, width: 228 }}>
+                          <Box sx={tableActionCellInnerSx}>
+                            <Tooltip title="Sửa">
+                              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <IconButton size="small" onClick={() => openEditUser(user)} aria-label="Sửa" sx={tableActionOutlined}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Tooltip>
+                            {user.id !== adminUser?.id ? (
+                              <Tooltip title="Xóa user">
+                                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                                  <IconButton size="small" color="error" onClick={() => handleDeleteUser(user)} aria-label="Xóa user" sx={tableActionDanger}>
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Box>
+                              </Tooltip>
+                            ) : (
+                              <Box sx={PLACEHOLDER_ICON} aria-hidden />
+                            )}
+                          </Box>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -491,12 +627,66 @@ const AdminDashboardView = ({ apiBaseUrl, authToken, adminUser, onOpenRoom, onLo
             </Stack>
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 2 }}>
-            <Button type="button" onClick={() => !isLoading && setCreateUserOpen(false)} disabled={isLoading}>
-              Hủy
-            </Button>
-            <Button type="submit" variant="contained" disabled={isLoading}>
-              Tạo user
-            </Button>
+            <Tooltip title="Hủy">
+              <IconButton type="button" size="small" onClick={() => !isLoading && setCreateUserOpen(false)} disabled={isLoading} aria-label="Hủy" sx={iconOutlinedSoft}>
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Tạo user">
+              <IconButton type="submit" size="small" disabled={isLoading} aria-label="Tạo user" sx={primarySubmitIconSx}>
+                <PersonAddIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </DialogActions>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={editUserOpen}
+        onClose={() => !isLoading && setEditUserOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        aria-labelledby="edit-user-dialog-title"
+      >
+        <form onSubmit={handleUpdateUser}>
+          <DialogTitle id="edit-user-dialog-title">Sửa tài khoản quản trị</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                label="Username"
+                value={editUsername}
+                onChange={(event) => setEditUsername(event.target.value)}
+                disabled={isLoading}
+                fullWidth
+                autoFocus
+              />
+              <TextField
+                label="Mật khẩu mới"
+                type="password"
+                value={editPassword}
+                onChange={(event) => setEditPassword(event.target.value)}
+                disabled={isLoading}
+                fullWidth
+                autoComplete="new-password"
+                helperText="Để trống để giữ mật khẩu hiện tại. Nếu đổi mật khẩu tài khoản đang đăng nhập, bạn sẽ cần đăng nhập lại."
+              />
+              <TextField select label="Role" value={editRole} onChange={(event) => setEditRole(event.target.value)} disabled={isLoading} fullWidth>
+                <MenuItem value="mod">mod</MenuItem>
+                <MenuItem value="admin">admin</MenuItem>
+              </TextField>
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Tooltip title="Hủy">
+              <IconButton type="button" size="small" onClick={() => !isLoading && setEditUserOpen(false)} disabled={isLoading} aria-label="Hủy" sx={iconOutlinedSoft}>
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Lưu">
+              <IconButton type="submit" size="small" disabled={isLoading} aria-label="Lưu" sx={primarySubmitIconSx}>
+                <CheckIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </DialogActions>
         </form>
       </Dialog>

@@ -13,7 +13,7 @@ const DataTable = ({ children, sx }) => (
       ...sx,
     }}
   >
-    <Table size="small">{children}</Table>
+    <Table size="small" sx={{ tableLayout: 'fixed', width: '100%' }}>{children}</Table>
   </TableContainer>
 );
 

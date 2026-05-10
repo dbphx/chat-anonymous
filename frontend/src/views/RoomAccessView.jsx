@@ -3,10 +3,19 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import MainNavbar from '../components/MainNavbar';
 import SectionCard from '../components/SectionCard';
+import { roomUserCount } from '../utils/roomMeta';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ChatIcon from '@mui/icons-material/Chat';
+import { iconPrimaryFilled, iconPrimaryFilledDisabled, iconOutlinedSoft } from '../utils/iconSx';
 
 const RoomAccessView = ({
   userName,
@@ -17,29 +26,30 @@ const RoomAccessView = ({
   userError,
   onJoinRoom,
   onBackToLobby,
-  onChangeName,
+  onOpenEditUserName,
   onAdminLogin,
 }) => (
   <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
     <MainNavbar
       title={selectedRoom ? `Phòng: ${selectedRoom.name}` : 'Phòng'}
-      subtitle={selectedRoom ? (
-        <Typography component="span" variant="body2">
-          Room ID:{' '}
-          <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace' }}>
-            {selectedRoom.id}
-          </Typography>
+      subtitle={userName ? (
+        <Typography component="span" variant="body2" color="text.secondary">
+          Người dùng hiện tại: <strong>{userName}</strong>
         </Typography>
       ) : null}
       mainClassName="lobby-layout"
       right={(
         <Stack spacing={1} width="100%">
-          <Button fullWidth variant="outlined" size="small" onClick={onBackToLobby}>
-            Về danh sách
-          </Button>
-          <Button fullWidth variant="outlined" size="small" onClick={onAdminLogin}>
-            Admin
-          </Button>
+          <Tooltip title="Về danh sách">
+            <Button fullWidth variant="outlined" size="small" onClick={onBackToLobby} aria-label="Về danh sách">
+              <ViewListIcon fontSize="small" />
+            </Button>
+          </Tooltip>
+          <Tooltip title="Admin">
+            <Button fullWidth variant="outlined" size="small" onClick={onAdminLogin} aria-label="Admin">
+              <AdminPanelSettingsIcon fontSize="small" />
+            </Button>
+          </Tooltip>
         </Stack>
       )}
     >
@@ -51,9 +61,11 @@ const RoomAccessView = ({
             <Typography variant="body1">
               <strong>Người dùng:</strong> {userName}
             </Typography>
-            <Button variant="outlined" size="small" onClick={onChangeName}>
-              Đổi tên
-            </Button>
+            <Tooltip title="Sửa tên">
+              <IconButton size="small" onClick={onOpenEditUserName} aria-label="Sửa tên" sx={iconOutlinedSoft}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
         </SectionCard>
 
@@ -61,30 +73,35 @@ const RoomAccessView = ({
           <Stack component="form" spacing={2} onSubmit={onJoinRoom}>
             {selectedRoom ? (
               <Stack spacing={0.5} sx={{ pb: 1 }}>
-                <Typography variant="body2"><strong>Phòng:</strong> {selectedRoom.name}</Typography>
                 <Typography variant="body2">
-                  <strong>Room ID:</strong>{' '}
-                  <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    {selectedRoom.id}
-                  </Typography>
+                  <strong>Phòng:</strong> {selectedRoom.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Người tham gia (đã có tin nhắn):{' '}
+                  <strong>{roomUserCount(selectedRoom)}</strong>
                 </Typography>
               </Stack>
             ) : null}
             <TextField
               label="Mật khẩu phòng"
               type="password"
+              size="small"
               fullWidth
               value={joinSecret}
               onChange={(event) => setJoinSecret(event.target.value)}
               disabled={userBusy}
             />
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <Button type="button" variant="outlined" onClick={onBackToLobby} disabled={userBusy} fullWidth>
-                Quay lại
-              </Button>
-              <Button type="submit" variant="contained" disabled={userBusy} fullWidth>
-                Vào chat
-              </Button>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+              <Tooltip title="Quay lại">
+                <Button type="button" variant="outlined" size="small" onClick={onBackToLobby} disabled={userBusy} fullWidth aria-label="Quay lại" sx={{ minHeight: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ArrowBackIcon fontSize="small" />
+                </Button>
+              </Tooltip>
+              <Tooltip title="Vào chat">
+                <Button type="submit" variant="contained" size="small" disabled={userBusy} fullWidth sx={{ ...iconPrimaryFilled, ...iconPrimaryFilledDisabled, minHeight: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Vào chat">
+                  <ChatIcon fontSize="small" />
+                </Button>
+              </Tooltip>
             </Stack>
           </Stack>
         </SectionCard>

@@ -190,6 +190,44 @@ func (h *AdminHandler) CreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, toAdminUserResponse(user))
 }
 
+func (h *AdminHandler) UpdateUser(c *gin.Context) {
+	if requireAdminRole(c) == nil {
+		return
+	}
+
+	var payload struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.adminService.UpdateUser(c.Param("id"), payload.Username, payload.Password, payload.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		case errors.Is(err, services.ErrInvalidRole):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "role must be mod or admin"})
+		case errors.Is(err, services.ErrUsernameExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+		case errors.Is(err, services.ErrAdminExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "An admin account already exists"})
+		case errors.Is(err, services.ErrCannotDemoteLastAdmin):
+			c.JSON(http.StatusConflict, gin.H{"error": "Cannot demote the last admin"})
+		default:
+			logrus.Error("Failed to update admin user:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, toAdminUserResponse(user))
+}
+
 func (h *AdminHandler) DeleteUser(c *gin.Context) {
 	user := requireAdminRole(c)
 	if user == nil {
@@ -229,10 +267,16 @@ func (h *AdminHandler) GetRooms(c *gin.Context) {
 		return
 	}
 
+	counts, err := h.messageService.CountDistinctUsersByRoomIDs(roomIDsFromItems(result.Items))
+	if err != nil {
+		logrus.Error("Failed to count room users:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
+		return
+	}
 	responses := make([]roomResponse, 0, len(result.Items))
 	for i := range result.Items {
 		room := result.Items[i]
-		responses = append(responses, toRoomResponse(&room))
+		responses = append(responses, toRoomResponse(&room, counts[room.ID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items": responses,
@@ -259,7 +303,13 @@ func (h *AdminHandler) JoinRoom(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toRoomResponse(room))
+	counts, err := h.messageService.CountDistinctUsersByRoomIDs([]string{room.ID})
+	if err != nil {
+		logrus.Error("Failed to count room users:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
 }
 
 func (h *AdminHandler) DeleteRoom(c *gin.Context) {
@@ -400,4 +450,32 @@ func (h *AdminHandler) DeleteMessage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Message deleted successfully"})
+}
+
+func (h *AdminHandler) PinMessage(c *gin.Context) {
+	if currentAdminUser(c) == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var payload struct {
+		Pinned bool `json:"pinned"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updatedMessage, err := h.messageService.SetMessagePinned(c.Param("id"), c.Param("messageId"), "", payload.Pinned, false)
+	if err != nil {
+		if errors.Is(err, services.ErrMessageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
+			return
+		}
+		logrus.Error("Failed to pin admin message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update pin"})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedMessage)
 }

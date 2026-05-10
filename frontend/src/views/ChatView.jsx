@@ -1,21 +1,51 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
+import Collapse from '@mui/material/Collapse';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
+import { alpha, useTheme } from '@mui/material/styles';
+import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
+import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Chat from '../components/Chat';
 import { parseJsonResponse } from '../utils/parseJsonResponse';
+import { iconOutlinedSoft } from '../utils/iconSx';
 
 const POLL_INTERVAL_MS = 3000;
 const ROOM_SECRET_HEADER = 'X-Room-Secret';
+
+const roomHeaderStorageKey = (roomId) => `chat-anonymous:room-header-open:${roomId || ''}`;
+
+const readHeaderExpanded = (roomId) => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+  try {
+    const v = window.sessionStorage.getItem(roomHeaderStorageKey(roomId));
+    if (v === '0') {
+      return false;
+    }
+    if (v === '1') {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return true;
+};
 
 const normalizeMessages = (apiBaseUrl, items) => {
   const safeItems = Array.isArray(items) ? items : [];
 
   return safeItems.map((message) => ({
     ...message,
+    pinned: Boolean(message.pinned),
     reply_to: message.reply_to ? {
       ...message.reply_to,
       content: message.reply_to.content || '',
@@ -37,7 +67,9 @@ const toReplyBannerMessage = (message) => ({
   content: message.content || (message.file?.name ? `[File] ${message.file.name}` : ''),
 });
 
-const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, mode = 'user', adminToken, onUnauthorized, adminUser }) => {
+const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayName, mode = 'user', adminToken, onUnauthorized, adminUser }) => {
+  const theme = useTheme();
+  const [headerExpanded, setHeaderExpanded] = useState(() => readHeaderExpanded(room?.id));
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -46,6 +78,32 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, mode = 'user', 
 
   const isAdminMode = mode === 'admin';
   const currentUser = isAdminMode ? (adminUser?.username || adminUser?.userName || 'admin') : userName;
+
+  const participantCount = useMemo(() => {
+    const names = new Set();
+    messages.forEach((message) => {
+      const name = typeof message.user === 'string' ? message.user.trim() : '';
+      if (name) {
+        names.add(name);
+      }
+    });
+    return names.size;
+  }, [messages]);
+
+  useEffect(() => {
+    setHeaderExpanded(readHeaderExpanded(room?.id));
+  }, [room?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || room?.id == null) {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(roomHeaderStorageKey(room.id), headerExpanded ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [headerExpanded, room?.id]);
 
   const getMessageHeaders = () => {
     if (isAdminMode) {
@@ -228,71 +286,235 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, mode = 'user', 
     }
   };
 
+  const handleSetPinned = async (message, pinned) => {
+    setIsLoading(true);
+    try {
+      const pinPath = isAdminMode
+        ? `/api/admin/rooms/${room.id}/messages/${message.id}/pin`
+        : `/api/rooms/${room.id}/messages/${message.id}/pin`;
+      const base = typeof apiBaseUrl === 'string' ? apiBaseUrl.replace(/\/$/, '') : '';
+      const url = `${base}${pinPath}`;
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(isAdminMode ? { Authorization: `Bearer ${adminToken}` } : {}),
+      };
+      const body = JSON.stringify(isAdminMode ? { pinned } : { user: userName, secret, pinned });
+
+      let response = await fetch(url, { method: 'PATCH', headers, body });
+      if (response.status === 404) {
+        response = await fetch(url, { method: 'POST', headers, body });
+      }
+
+      const data = await parseJsonResponse(response);
+
+      if (!response.ok) {
+        throw new Error((data && data.error) || 'Không cập nhật được ghim tin');
+      }
+
+      await refreshMessages();
+    } catch (pinError) {
+      setError(pinError.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Box
       sx={{
-        display: 'flex',
-        flexDirection: 'column',
         minHeight: '100vh',
         bgcolor: 'background.default',
-        maxWidth: 920,
-        mx: 'auto',
         width: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        px: { xs: 2, sm: 3 },
+        py: { xs: 2, sm: 3 },
+        boxSizing: 'border-box',
       }}
     >
-      <Box sx={{ p: { xs: 2, sm: 3 }, pb: 0 }}>
-        <Paper variant="outlined" sx={{ p: 2.5, borderColor: 'rgba(15, 23, 42, 0.1)', boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06)' }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
-            <Box>
-              <Typography variant="body2">
-                <strong>Room:</strong> {room.name}
+      <Paper
+        elevation={0}
+        variant="outlined"
+        sx={{
+          width: '100%',
+          maxWidth: 920,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: { xs: 'calc(100vh - 32px)', sm: 'calc(100vh - 56px)' },
+          maxHeight: { xs: 'calc(100vh - 32px)', sm: 'calc(100vh - 56px)' },
+          overflow: 'hidden',
+          borderRadius: 2,
+          borderColor: 'rgba(15, 23, 42, 0.1)',
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06)',
+        }}
+      >
+        {/* Tiêu đề phòng — luôn có thanh tóm tắt; phần chi tiết có thể thu gọn */}
+        <Box
+          sx={{
+            flexShrink: 0,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={1}
+            sx={{ px: { xs: 1.5, sm: 2 }, py: { xs: 1.25, sm: 1.5 } }}
+          >
+            <Tooltip title={headerExpanded ? 'Thu gọn tiêu đề phòng' : 'Mở rộng tiêu đề phòng'}>
+              <IconButton
+                size="small"
+                onClick={() => setHeaderExpanded((open) => !open)}
+                aria-expanded={headerExpanded}
+                aria-label={headerExpanded ? 'Thu gọn tiêu đề phòng' : 'Mở rộng tiêu đề phòng'}
+                sx={iconOutlinedSoft}
+              >
+                {headerExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography
+                variant="overline"
+                sx={{
+                  letterSpacing: '0.14em',
+                  fontWeight: 800,
+                  fontSize: '0.65rem',
+                  color: 'primary.main',
+                  display: 'block',
+                  lineHeight: 1.2,
+                }}
+              >
+                Phòng chat
               </Typography>
-              <Typography variant="body2">
-                <strong>Room ID:</strong>{' '}
-                <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {room.id}
-                </Typography>
-              </Typography>
-              <Typography variant="body2">
-                <strong>User:</strong> {currentUser}
+              <Typography
+                variant="subtitle1"
+                component="h1"
+                noWrap
+                sx={{
+                  fontWeight: 800,
+                  mt: 0.25,
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1.25,
+                  color: 'text.primary',
+                }}
+              >
+                {room.name}
               </Typography>
             </Box>
-            <Button variant="outlined" onClick={onLeave}>
-              Back to rooms
-            </Button>
+            <Tooltip title="Về danh sách phòng">
+              <IconButton
+                size="small"
+                onClick={onLeave}
+                aria-label="Về danh sách phòng"
+                sx={{ flexShrink: 0, ...iconOutlinedSoft }}
+              >
+                <ArrowBackIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
-        </Paper>
+
+          <Collapse in={headerExpanded} timeout="auto">
+            <Box
+              sx={{
+                flexShrink: 0,
+                px: { xs: 2, sm: 2.5 },
+                py: 1.75,
+                borderTop: `2px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+                borderBottom: `2px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+                bgcolor: alpha(theme.palette.primary.main, 0.06),
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 0.04, display: 'block', mb: 1.25 }}>
+                Bạn đang gửi tin nhắn với tên
+              </Typography>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={{ xs: 1.5, sm: 2 }}
+                alignItems={{ xs: 'stretch', sm: 'center' }}
+                justifyContent="space-between"
+              >
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Chip
+                    label={currentUser}
+                    color="primary"
+                    variant="filled"
+                    size="small"
+                    sx={{ fontWeight: 700, px: 0.5, height: 30, '& .MuiChip-label': { px: 1.25 } }}
+                  />
+                  {!isAdminMode && typeof onEditDisplayName === 'function' ? (
+                    <Tooltip title="Đổi tên hiển thị">
+                      <IconButton size="small" onClick={onEditDisplayName} aria-label="Đổi tên hiển thị" sx={iconOutlinedSoft}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : null}
+                </Stack>
+                <Box
+                  sx={{
+                    pl: { xs: 0, sm: 2 },
+                    borderLeft: { xs: 'none', sm: '1px solid' },
+                    borderColor: { sm: 'divider' },
+                    alignSelf: { xs: 'stretch', sm: 'center' },
+                    py: { xs: 1.25, sm: 0 },
+                    borderTop: { xs: '1px dashed', sm: 'none' },
+                    borderTopColor: { xs: 'divider' },
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600 }}>
+                    Người tham gia (ước lượng theo tin nhắn)
+                  </Typography>
+                  <Typography variant="h6" component="p" sx={{ m: 0, mt: 0.25, fontWeight: 800, color: 'text.primary', lineHeight: 1.2 }}>
+                    {participantCount}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Box>
+          </Collapse>
+        </Box>
+
         {error ? (
-          <Alert severity="error" sx={{ mt: 2 }}>
+          <Alert severity="error" sx={{ flexShrink: 0, borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
             {error}
           </Alert>
         ) : null}
-      </Box>
 
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, px: { xs: 2, sm: 3 }, pb: 3, pt: 2 }}>
-        <Chat
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          onUpdateMessage={handleUpdateMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onReply={(message) => {
-            setReplyTarget(toReplyBannerMessage(message));
-            setEditingMessage(null);
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            bgcolor: 'grey.50',
           }}
-          onEdit={(message) => {
-            setEditingMessage(message);
-            setReplyTarget(null);
-          }}
-          onCancelReply={() => setReplyTarget(null)}
-          onCancelEdit={() => setEditingMessage(null)}
-          replyTarget={replyTarget}
-          editingMessage={editingMessage}
-          isLoading={isLoading}
-          user={currentUser}
-          draftStorageKey={`chat-anonymous:composer:${room.id}:${currentUser}`}
-          canManageMessage={isAdminMode}
-        />
-      </Box>
+        >
+          <Chat
+            key={room.id}
+            onSetMessagePinned={handleSetPinned}
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            onUpdateMessage={handleUpdateMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onReply={(message) => {
+              setReplyTarget(toReplyBannerMessage(message));
+              setEditingMessage(null);
+            }}
+            onEdit={(message) => {
+              setEditingMessage(message);
+              setReplyTarget(null);
+            }}
+            onCancelReply={() => setReplyTarget(null)}
+            onCancelEdit={() => setEditingMessage(null)}
+            replyTarget={replyTarget}
+            editingMessage={editingMessage}
+            isLoading={isLoading}
+            user={currentUser}
+            draftStorageKey={`chat-anonymous:composer:${room.id}:${currentUser}`}
+            canManageMessage={isAdminMode}
+          />
+        </Box>
+      </Paper>
     </Box>
   );
 };

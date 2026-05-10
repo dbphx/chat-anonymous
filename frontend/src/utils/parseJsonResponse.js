@@ -18,7 +18,8 @@ export async function parseJsonResponse(response) {
         : '';
     throw new Error(
       `Server returned plain text (${trimmed.slice(0, 120)}${trimmed.length > 120 ? '…' : ''}) instead of JSON.${hint} ` +
-        'Use the Go API base URL (port 8081 in this project). For local npm start without REACT_APP_BACKEND_URL, use package.json "proxy" and relative /api URLs.'
+        'Use the Go API (port 8081 for direct access). In dev, leave REACT_APP_BACKEND_URL unset so `package.json` "proxy" sends `/api` to the backend. ' +
+        'If the path is valid but you see 404, restart the Go server or `docker compose build backend` so routes like PATCH …/messages/:id/pin are registered.'
     );
   }
 

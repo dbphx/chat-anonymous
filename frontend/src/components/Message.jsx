@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
@@ -7,16 +8,26 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Link from '@mui/material/Link';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
+import PushPinIcon from '@mui/icons-material/PushPin';
 
 const formatTime = (value) => new Date((value || 0) * 1000).toLocaleTimeString([], {
   hour: '2-digit',
   minute: '2-digit',
 });
 
-const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMessage }) => {
+const Message = ({
+  message,
+  currentUser,
+  onReply,
+  onEdit,
+  onDelete,
+  canManageMessage,
+  onTogglePin,
+}) => {
   const isOwnMessage = currentUser && message.user === currentUser;
   const canEditMessage = canManageMessage || isOwnMessage;
   const canDeleteMessage = canManageMessage || isOwnMessage;
+  const canPinMessage = canEditMessage && typeof onTogglePin === 'function';
   const hasText = Boolean(message.content);
   const hasFile = Boolean(message.file?.url);
   const replyPreview = message.reply_to;
@@ -34,22 +45,30 @@ const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMes
 
   return (
     <Box
+      id={message.id ? `chat-message-${message.id}` : undefined}
       sx={{
         display: 'flex',
         justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
-        mb: 1.5,
+        mb: 2,
+        px: { xs: 0, sm: 0.25 },
       }}
     >
       <Paper
         elevation={0}
         sx={{
-          maxWidth: 'min(520px, 85%)',
+          maxWidth: 'min(520px, 88%)',
           px: 2,
-          py: 1.25,
-          borderRadius: 2.5,
-          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
+          py: 1.35,
+          borderRadius: 2,
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.04)',
           bgcolor: isOwnMessage ? 'primary.main' : 'grey.50',
           border: isOwnMessage ? 'none' : '1px solid rgba(15, 23, 42, 0.08)',
+          ...(message.pinned
+            ? {
+              borderLeft: '4px solid',
+              borderLeftColor: isOwnMessage ? 'rgba(255,255,255,0.85)' : 'primary.main',
+            }
+            : {}),
           color: isOwnMessage ? 'primary.contrastText' : 'text.primary',
           '& .MuiTypography-root': {
             color: 'inherit',
@@ -59,9 +78,14 @@ const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMes
           },
         }}
       >
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, opacity: 0.95 }}>
-          {message.user || 'Anonymous'}
-        </Typography>
+        <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, opacity: 0.95 }}>
+            {message.user || 'Anonymous'}
+          </Typography>
+          {message.pinned ? (
+            <PushPinIcon sx={{ fontSize: '1rem', opacity: 0.9, flexShrink: 0 }} aria-label="Đã ghim" />
+          ) : null}
+        </Stack>
         {replyPreview ? (
           <Box
             sx={{
@@ -73,7 +97,7 @@ const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMes
             }}
           >
             <Typography variant="caption" display="block" sx={{ fontWeight: 600 }}>
-              Reply to {replyPreview.user || 'Anonymous'}
+              Trả lời {replyPreview.user || 'Ẩn danh'}
             </Typography>
             <Typography variant="body2">{replyPreview.content || '[Attachment]'}</Typography>
           </Box>
@@ -111,13 +135,13 @@ const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMes
             {formatTime(message.created)}
             {message.edited ? (
               <Typography component="span" variant="caption" sx={{ ml: 0.75, fontStyle: 'italic' }}>
-                edited
+                đã sửa
               </Typography>
             ) : null}
           </Typography>
           <IconButton
             size="small"
-            aria-label="Message actions"
+            aria-label="Thao tác tin nhắn"
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? `message-actions-${message.id}` : undefined}
             onClick={(event) => setAnchorEl(event.currentTarget)}
@@ -137,16 +161,26 @@ const Message = ({ message, currentUser, onReply, onEdit, onDelete, canManageMes
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            <MenuItem onClick={() => handleAction(onReply)}>Reply</MenuItem>
+            <MenuItem onClick={() => handleAction(onReply)}>Trả lời</MenuItem>
+            {canPinMessage ? (
+              <MenuItem
+                onClick={() => {
+                  handleCloseMenu();
+                  onTogglePin();
+                }}
+              >
+                {message.pinned ? 'Bỏ ghim' : 'Ghim tin nhắn'}
+              </MenuItem>
+            ) : null}
             {canEditMessage ? (
-              <MenuItem onClick={() => handleAction(onEdit)}>Edit</MenuItem>
+              <MenuItem onClick={() => handleAction(onEdit)}>Sửa</MenuItem>
             ) : null}
             {canDeleteMessage ? (
               <MenuItem
                 onClick={() => handleAction(onDelete)}
                 sx={{ color: 'error.main' }}
               >
-                Delete
+                Xóa
               </MenuItem>
             ) : null}
           </Menu>

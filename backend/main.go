@@ -68,6 +68,9 @@ func main() {
 		api.DELETE("/rooms/:id", roomHandler.DeleteRoom)
 		api.POST("/rooms/:id/messages", messageHandler.SendMessage)
 		api.GET("/rooms/:id/messages", messageHandler.GetMessages)
+		// Pin must register before PATCH …/messages/:messageId so Gin does not shadow /pin
+		api.PATCH("/rooms/:id/messages/:messageId/pin", messageHandler.PinMessage)
+		api.POST("/rooms/:id/messages/:messageId/pin", messageHandler.PinMessage)
 		api.PATCH("/rooms/:id/messages/:messageId", messageHandler.UpdateMessage)
 		api.DELETE("/rooms/:id/messages/:messageId", messageHandler.DeleteMessage)
 
@@ -82,10 +85,13 @@ func main() {
 			adminProtected.DELETE("/rooms/:id", adminHandler.DeleteRoom)
 			adminProtected.GET("/rooms/:id/messages", adminHandler.GetMessages)
 			adminProtected.POST("/rooms/:id/messages", adminHandler.SendMessage)
+			adminProtected.PATCH("/rooms/:id/messages/:messageId/pin", adminHandler.PinMessage)
+			adminProtected.POST("/rooms/:id/messages/:messageId/pin", adminHandler.PinMessage)
 			adminProtected.PATCH("/rooms/:id/messages/:messageId", adminHandler.UpdateMessage)
 			adminProtected.DELETE("/rooms/:id/messages/:messageId", adminHandler.DeleteMessage)
 			adminProtected.GET("/users", adminHandler.ListUsers)
 			adminProtected.POST("/users", adminHandler.CreateUser)
+			adminProtected.PATCH("/users/:id", adminHandler.UpdateUser)
 			adminProtected.DELETE("/users/:id", adminHandler.DeleteUser)
 		}
 	}

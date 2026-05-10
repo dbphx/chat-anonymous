@@ -165,7 +165,14 @@ const MainNavbar = ({
               flexDirection: 'column',
               gap: 1,
               alignItems: 'stretch',
+              justifyContent: 'center',
               '& .MuiButton-root': collapsed ? { minWidth: 0, px: 1 } : {},
+              '& .MuiButton-root, & .MuiIconButton-root': {
+                display: 'inline-flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                minHeight: 36,
+              },
             }}
           >
             {right}

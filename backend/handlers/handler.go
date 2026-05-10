@@ -26,17 +26,27 @@ type RoomHandler struct {
 }
 
 type roomResponse struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Created int64  `json:"created"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Created   int64  `json:"created"`
+	UserCount int    `json:"user_count"`
 }
 
-func toRoomResponse(room *models.Room) roomResponse {
+func toRoomResponse(room *models.Room, userCount int) roomResponse {
 	return roomResponse{
-		ID:      room.ID,
-		Name:    room.Name,
-		Created: room.Created,
+		ID:        room.ID,
+		Name:      room.Name,
+		Created:   room.Created,
+		UserCount: userCount,
 	}
+}
+
+func roomIDsFromItems(items []models.Room) []string {
+	ids := make([]string, 0, len(items))
+	for i := range items {
+		ids = append(ids, items[i].ID)
+	}
+	return ids
 }
 
 // NewRoomHandler creates a new RoomHandler
@@ -57,10 +67,16 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
 		return
 	}
+	counts, err := h.messageService.CountDistinctUsersByRoomIDs(roomIDsFromItems(result.Items))
+	if err != nil {
+		logrus.Error("Failed to count room users:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get rooms"})
+		return
+	}
 	responses := make([]roomResponse, 0, len(result.Items))
 	for i := range result.Items {
 		roomCopy := result.Items[i]
-		responses = append(responses, toRoomResponse(&roomCopy))
+		responses = append(responses, toRoomResponse(&roomCopy, counts[roomCopy.ID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items": responses,
@@ -92,7 +108,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toRoomResponse(createdRoom))
+	c.JSON(http.StatusCreated, toRoomResponse(createdRoom, 0))
 }
 
 // GetRoom retrieves a room by ID
@@ -104,7 +120,13 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
 		return
 	}
-	c.JSON(http.StatusOK, toRoomResponse(room))
+	counts, err := h.messageService.CountDistinctUsersByRoomIDs([]string{room.ID})
+	if err != nil {
+		logrus.Error("Failed to count room users:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
 }
 
 // JoinRoom checks the provided secret and returns room info.
@@ -138,7 +160,13 @@ func (h *RoomHandler) JoinRoom(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toRoomResponse(room))
+	counts, err := h.messageService.CountDistinctUsersByRoomIDs([]string{room.ID})
+	if err != nil {
+		logrus.Error("Failed to count room users:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
+		return
+	}
+	c.JSON(http.StatusOK, toRoomResponse(room, counts[room.ID]))
 }
 
 // DeleteRoom deletes a room by ID
@@ -269,6 +297,12 @@ type updateMessagePayload struct {
 type deleteMessagePayload struct {
 	User   string `json:"user"`
 	Secret string `json:"secret"`
+}
+
+type pinMessagePayload struct {
+	User   string `json:"user"`
+	Secret string `json:"secret"`
+	Pinned bool   `json:"pinned"`
 }
 
 func parseMessageRequest(c *gin.Context, requireUser bool) (*sendMessagePayload, *multipart.FileHeader, error) {
@@ -547,4 +581,61 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Message deleted successfully"})
+}
+
+// PinMessage pins or unpins a message (only author in user API).
+func (h *MessageHandler) PinMessage(c *gin.Context) {
+	roomID := c.Param("id")
+	messageID := c.Param("messageId")
+
+	var payload pinMessagePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	payload.User = strings.TrimSpace(payload.User)
+	payload.Secret = strings.TrimSpace(payload.Secret)
+	if payload.Secret == "" {
+		payload.Secret = strings.TrimSpace(c.GetHeader(roomSecretHeader))
+	}
+	if payload.Secret == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "secret is required"})
+		return
+	}
+	if payload.User == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user is required"})
+		return
+	}
+
+	_, err := h.roomService.ValidateSecret(roomID, payload.Secret)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidSecret) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid secret"})
+			return
+		}
+		if errors.Is(err, services.ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		return
+	}
+
+	updatedMessage, err := h.service.SetMessagePinned(roomID, messageID, payload.User, payload.Pinned, true)
+	if err != nil {
+		if errors.Is(err, services.ErrMessageNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You can only pin your own messages"})
+			return
+		}
+		if errors.Is(err, services.ErrMessageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
+			return
+		}
+		logrus.Error("Failed to pin message:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update pin"})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedMessage)
 }

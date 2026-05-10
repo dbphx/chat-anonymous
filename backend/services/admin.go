@@ -26,6 +26,7 @@ var ErrAdminExists = errors.New("admin already exists")
 var ErrUsernameExists = errors.New("username already exists")
 var ErrUserNotFound = errors.New("user not found")
 var ErrCannotDeleteLastAdmin = errors.New("cannot delete the last admin")
+var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last admin")
 var ErrCannotDeleteSelf = errors.New("cannot delete the current admin account")
 var ErrSessionNotFound = errors.New("session not found")
 var ErrSessionExpired = errors.New("session expired")
@@ -293,6 +294,96 @@ func (s *AdminService) CreateUser(username, password, role string) (*models.Admi
 		return nil, err
 	}
 	return user, nil
+}
+
+// UpdateUser updates username, password (if non-empty), and/or role. Clears sessions for that user on success.
+func (s *AdminService) UpdateUser(targetID, username, password, role string) (*models.AdminUser, error) {
+	targetID = strings.TrimSpace(targetID)
+	user, err := s.findUserByID(targetID)
+	if err != nil {
+		return nil, err
+	}
+
+	newUsername := strings.TrimSpace(username)
+	newRole := strings.TrimSpace(role)
+	password = strings.TrimSpace(password)
+
+	if newUsername == "" {
+		newUsername = user.Username
+	} else if newUsername != user.Username {
+		existing, lookupErr := s.findUserByUsername(newUsername)
+		if lookupErr == nil && existing.ID != user.ID {
+			return nil, ErrUsernameExists
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, ErrUserNotFound) {
+			return nil, lookupErr
+		}
+	}
+
+	if newRole == "" {
+		newRole = user.Role
+	}
+	if newRole != models.RoleMod && newRole != models.RoleAdmin {
+		return nil, ErrInvalidRole
+	}
+
+	if user.Role == models.RoleAdmin && newRole == models.RoleMod {
+		count, err := s.db.Database("chat").Collection(adminUsersCollection).CountDocuments(context.TODO(), bson.M{"role": models.RoleAdmin})
+		if err != nil {
+			return nil, err
+		}
+		if count <= 1 {
+			return nil, ErrCannotDemoteLastAdmin
+		}
+	}
+
+	if user.Role != models.RoleAdmin && newRole == models.RoleAdmin {
+		count, err := s.db.Database("chat").Collection(adminUsersCollection).CountDocuments(context.TODO(), bson.M{"role": models.RoleAdmin})
+		if err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			return nil, ErrAdminExists
+		}
+	}
+
+	setFields := bson.M{
+		"username": newUsername,
+		"role":     newRole,
+		"updated":  time.Now().Unix(),
+	}
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		setFields["password_hash"] = string(hash)
+	}
+
+	ctx := context.TODO()
+	_, err = s.db.Database("chat").Collection(adminUsersCollection).UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{"$set": setFields})
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().Unix()
+	if password != "" {
+		_, _ = s.db.Database("chat").Collection(adminSessionsCollection).DeleteMany(ctx, bson.M{"user_id": user.ID})
+	} else {
+		_, _ = s.db.Database("chat").Collection(adminSessionsCollection).UpdateMany(ctx, bson.M{"user_id": user.ID}, bson.M{
+			"$set": bson.M{
+				"username": newUsername,
+				"role":     newRole,
+				"updated":  now,
+			},
+		})
+	}
+
+	updated, err := s.findUserByID(user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (s *AdminService) DeleteUser(id, requesterID string) error {

@@ -93,6 +93,10 @@ const theme = createTheme({
           borderRadius: 10,
           paddingLeft: 18,
           paddingRight: 18,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          verticalAlign: 'middle',
         },
         sizeSmall: {
           paddingLeft: 14,
@@ -111,6 +115,38 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 10,
+          boxSizing: 'border-box',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          verticalAlign: 'middle',
+        },
+        sizeSmall: {
+          padding: 8,
+        },
+      },
+    },
+    MuiCardHeader: {
+      styleOverrides: {
+        /** Mặc định MUI đặt action alignSelf:flex-start + margin âm → nút header bị lệch */
+        action: {
+          alignSelf: 'center',
+          marginTop: 0,
+          marginBottom: 0,
+          marginRight: 0,
+          display: 'flex',
+          alignItems: 'center',
+        },
+      },
+    },
+    MuiDialogActions: {
+      styleOverrides: {
+        root: {
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          paddingTop: 8,
         },
       },
     },
@@ -215,6 +251,7 @@ const theme = createTheme({
           borderColor: 'rgba(15, 23, 42, 0.06)',
           paddingTop: 14,
           paddingBottom: 14,
+          verticalAlign: 'middle',
         },
         body: {
           fontSize: '0.875rem',

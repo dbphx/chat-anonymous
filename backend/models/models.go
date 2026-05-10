@@ -23,6 +23,7 @@ type Message struct {
 	File    *MessageFile    `json:"file,omitempty" bson:"file,omitempty"`
 	ReplyTo *MessageReplyTo `json:"reply_to,omitempty" bson:"reply_to,omitempty"`
 	Edited  bool            `json:"edited" bson:"edited"`
+	Pinned  bool            `json:"pinned,omitempty" bson:"pinned,omitempty"`
 	Created int64           `json:"created" bson:"created"`
 	Updated int64           `json:"updated,omitempty" bson:"updated,omitempty"`
 }

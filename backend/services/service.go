@@ -338,6 +338,29 @@ func (s *MessageService) deleteMessage(roomID, messageID, user string, enforceOw
 	return message, nil
 }
 
+// SetMessagePinned sets the pinned flag; enforceOwnership requires message author to match user.
+func (s *MessageService) SetMessagePinned(roomID, messageID, user string, pinned bool, enforceOwnership bool) (*models.Message, error) {
+	message, err := s.GetMessage(roomID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if enforceOwnership && message.User != user {
+		return nil, ErrMessageNotOwned
+	}
+
+	collection := s.db.Database("chat").Collection("messages")
+	_, err = collection.UpdateOne(
+		context.TODO(),
+		bson.M{"_id": messageID, "room_id": roomID},
+		bson.M{"$set": bson.M{"pinned": pinned}},
+	)
+	if err != nil {
+		return nil, err
+	}
+	message.Pinned = pinned
+	return message, nil
+}
+
 // GetMessages retrieves messages from a room
 func (s *MessageService) GetMessages(roomID string) ([]models.Message, error) {
 	collection := s.db.Database("chat").Collection("messages")
@@ -353,6 +376,48 @@ func (s *MessageService) GetMessages(roomID string) ([]models.Message, error) {
 		return nil, err
 	}
 	return results, nil
+}
+
+// CountDistinctUsersByRoomIDs returns, for each room ID, the number of distinct message authors in that room.
+func (s *MessageService) CountDistinctUsersByRoomIDs(roomIDs []string) (map[string]int, error) {
+	out := make(map[string]int)
+	if len(roomIDs) == 0 {
+		return out, nil
+	}
+
+	collection := s.db.Database("chat").Collection("messages")
+	// $addToSet + $size avoids fragile nested $_id paths across MongoDB/driver versions.
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.M{"room_id": bson.M{"$in": roomIDs}}}},
+		bson.D{{Key: "$group", Value: bson.M{
+			"_id":   "$room_id",
+			"users": bson.M{"$addToSet": "$user"},
+		}}},
+		bson.D{{Key: "$project", Value: bson.M{
+			"count": bson.M{"$size": "$users"},
+		}}},
+	}
+
+	cursor, err := collection.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	type aggRow struct {
+		ID    string `bson:"_id"`
+		Count int    `bson:"count"`
+	}
+
+	for cursor.Next(context.TODO()) {
+		var row aggRow
+		if err := cursor.Decode(&row); err != nil {
+			return nil, err
+		}
+		out[row.ID] = row.Count
+	}
+
+	return out, cursor.Err()
 }
 
 func removeUploadedFile(fileURL string) error {

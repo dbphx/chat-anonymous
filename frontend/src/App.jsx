@@ -8,6 +8,7 @@ import AdminLoginView from './views/AdminLoginView';
 import AdminDashboardView from './views/AdminDashboardView';
 import LobbyView from './views/LobbyView';
 import RoomAccessView from './views/RoomAccessView';
+import ChangeNameDialog from './components/ChangeNameDialog';
 import { parseJsonResponse } from './utils/parseJsonResponse';
 import { normalizePagedResponse } from './utils/pagedList';
 
@@ -39,30 +40,39 @@ const API_BASE_URL = resolveApiBaseUrl();
 const APP_STORAGE_KEY = 'chat-anonymous:app-state';
 const ADMIN_STORAGE_KEY = 'chat-anonymous:admin-auth';
 
+/** adminTab: 'rooms' | 'users' chỉ dùng khi view === admin-dashboard */
 const parsePathname = (pathname) => {
   const segments = pathname.split('/').filter(Boolean);
 
   if (segments[0] === 'admin') {
     if (segments[1] === 'login') {
-      return { view: 'admin-login', roomId: null };
+      return { view: 'admin-login', roomId: null, adminTab: null };
     }
 
     if (segments[1] === 'rooms' && segments[2]) {
-      return { view: 'admin-room', roomId: segments[2] };
+      return { view: 'admin-room', roomId: segments[2], adminTab: null };
     }
 
-    return { view: 'admin-dashboard', roomId: null };
+    if (segments[1] === 'users') {
+      return { view: 'admin-dashboard', roomId: null, adminTab: 'users' };
+    }
+
+    if (segments[1] === 'rooms') {
+      return { view: 'admin-dashboard', roomId: null, adminTab: 'rooms' };
+    }
+
+    return { view: 'admin-dashboard', roomId: null, adminTab: 'rooms' };
   }
 
   if (segments[0] === 'room' && segments[1]) {
-    return { view: 'room', roomId: segments[1] };
+    return { view: 'room', roomId: segments[1], adminTab: null };
   }
 
   if (segments[0] === 'chat' && segments[1]) {
-    return { view: 'chat', roomId: segments[1] };
+    return { view: 'chat', roomId: segments[1], adminTab: null };
   }
 
-  return { view: 'home', roomId: null };
+  return { view: 'home', roomId: null, adminTab: null };
 };
 
 const getRoomById = (rooms, roomId) => rooms.find((room) => room && room.id === roomId) || null;
@@ -173,6 +183,7 @@ function App() {
   const [adminAuth, setAdminAuth] = useState(() => readStoredAdminAuth());
   const [adminUser, setAdminUser] = useState(() => readStoredAdminAuth().user);
   const [isAdminChecking, setIsAdminChecking] = useState(Boolean(readStoredAdminAuth().token));
+  const [editNameOpen, setEditNameOpen] = useState(false);
 
   const route = parsePathname(pathname);
 
@@ -408,9 +419,25 @@ function App() {
     }
 
     if (adminAuth.token && route.view === 'admin-login' && !isAdminChecking) {
-      navigate('/admin', true);
+      navigate('/admin/rooms', true);
     }
   }, [adminAuth.token, isAdminChecking, pathname, route.view]);
+
+  useEffect(() => {
+    if (route.view !== 'admin-dashboard') {
+      return;
+    }
+    if (route.adminTab !== 'users') {
+      return;
+    }
+    if (isAdminChecking) {
+      return;
+    }
+    if (adminUser?.role === 'admin') {
+      return;
+    }
+    navigate('/admin/rooms', true);
+  }, [route.view, route.adminTab, adminUser?.role, isAdminChecking, pathname]);
 
   const handleFetchRoomsPage = async (opts) => {
     setUserBusy(true);
@@ -441,13 +468,23 @@ function App() {
     setUserError('');
   };
 
-  const handleChangeName = () => {
+  const handleClearUserSession = () => {
     setUserName('');
     setSelectedRoom(null);
     setJoinedRoom(null);
     setJoinSecret('');
     setUserError('');
+    setEditNameOpen(false);
     navigate('/');
+  };
+
+  const handleSaveDisplayName = (next) => {
+    const t = String(next).trim();
+    if (!t) {
+      return;
+    }
+    setUserName(t);
+    setUserError('');
   };
 
   const handleCreateRoom = async (event) => {
@@ -575,7 +612,7 @@ function App() {
 
       setAdminAuth({ token: data.token, user: data.user });
       setAdminUser(data.user);
-      navigate('/admin', true);
+      navigate('/admin/rooms', true);
     } catch (loginError) {
       setUserError(loginError.message);
     } finally {
@@ -620,14 +657,22 @@ function App() {
       );
     }
 
+    const dashboardTab = route.adminTab === 'users' && adminUser?.role === 'admin' ? 'users' : 'rooms';
+
     return (
       <AdminDashboardView
         apiBaseUrl={API_BASE_URL}
         authToken={adminAuth.token}
         adminUser={adminUser}
+        activeTab={dashboardTab}
+        onNavigateTab={(tabId) => navigate(tabId === 'users' ? '/admin/users' : '/admin/rooms')}
         onOpenRoom={(room) => navigate(`/admin/rooms/${room.id}`)}
         onLogout={handleAdminLogout}
         onUnauthorized={handleAdminUnauthorized}
+        onAdminUserUpdated={(user) => {
+          setAdminUser(user);
+          setAdminAuth((prev) => ({ ...prev, user }));
+        }}
       />
     );
   }
@@ -655,23 +700,11 @@ function App() {
         apiBaseUrl={API_BASE_URL}
         room={room}
         userName={adminUser?.username || 'admin'}
-        onLeave={() => navigate('/admin')}
+        onLeave={() => navigate('/admin/rooms')}
         mode="admin"
         adminToken={adminAuth.token}
         adminUser={adminUser}
         onUnauthorized={handleAdminUnauthorized}
-      />
-    );
-  }
-
-  if (joinedRoom) {
-    return (
-      <ChatView
-        apiBaseUrl={API_BASE_URL}
-        room={joinedRoom}
-        secret={roomSecret}
-        userName={userName}
-        onLeave={handleLeaveRoom}
       />
     );
   }
@@ -693,26 +726,61 @@ function App() {
     userBusy,
     userError,
     onAdminLogin: () => navigate('/admin/login'),
-    onChangeName: handleChangeName,
+    onOpenEditUserName: () => setEditNameOpen(true),
+    onClearUserSession: handleClearUserSession,
   };
 
+  const changeNameDialog = (
+    <ChangeNameDialog
+      open={editNameOpen && Boolean(userName)}
+      onClose={() => setEditNameOpen(false)}
+      initialName={userName}
+      onSave={handleSaveDisplayName}
+      busy={userBusy}
+    />
+  );
+
+  if (joinedRoom) {
+    return (
+      <>
+        <ChatView
+          apiBaseUrl={API_BASE_URL}
+          room={joinedRoom}
+          secret={roomSecret}
+          userName={userName}
+          onLeave={handleLeaveRoom}
+          onEditDisplayName={() => setEditNameOpen(true)}
+        />
+        {changeNameDialog}
+      </>
+    );
+  }
+
   if (!userName || !selectedRoom) {
-    return <LobbyView {...lobbyProps} />;
+    return (
+      <>
+        <LobbyView {...lobbyProps} />
+        {changeNameDialog}
+      </>
+    );
   }
 
   return (
-    <RoomAccessView
-      userName={userName}
-      selectedRoom={selectedRoom}
-      joinSecret={joinSecret}
-      setJoinSecret={setJoinSecret}
-      userBusy={userBusy}
-      userError={userError}
-      onJoinRoom={handleJoinRoom}
-      onBackToLobby={handleBackToLobby}
-      onChangeName={handleChangeName}
-      onAdminLogin={() => navigate('/admin/login')}
-    />
+    <>
+      <RoomAccessView
+        userName={userName}
+        selectedRoom={selectedRoom}
+        joinSecret={joinSecret}
+        setJoinSecret={setJoinSecret}
+        userBusy={userBusy}
+        userError={userError}
+        onJoinRoom={handleJoinRoom}
+        onBackToLobby={handleBackToLobby}
+        onOpenEditUserName={() => setEditNameOpen(true)}
+        onAdminLogin={() => navigate('/admin/login')}
+      />
+      {changeNameDialog}
+    </>
   );
 }
 
