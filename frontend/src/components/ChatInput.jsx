@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import { alpha } from '@mui/material/styles';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import Popover from '@mui/material/Popover';
@@ -11,6 +12,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
+import FormatQuoteIcon from '@mui/icons-material/FormatQuote';
 import SaveIcon from '@mui/icons-material/Save';
 import { iconOutlinedSoft, iconPrimaryFilled, iconPrimaryFilledDisabled } from '../utils/iconSx';
 
@@ -188,26 +190,53 @@ const ChatInput = ({
           <Stack
             direction="row"
             alignItems="flex-start"
-            justifyContent="space-between"
-            spacing={1}
+            spacing={1.25}
             sx={{
               p: 1.5,
-              bgcolor: 'action.hover',
+              pr: 1,
               borderRadius: 1.5,
               border: '1px solid',
               borderColor: 'divider',
+              borderLeft: '4px solid',
+              borderLeftColor: 'primary.main',
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.06),
             }}
           >
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="subtitle2" fontWeight={700}>
-                Trả lời {replyTarget.user || 'Ẩn danh'}
+            <FormatQuoteIcon
+              sx={{
+                flexShrink: 0,
+                mt: 0.15,
+                fontSize: '1.35rem',
+                color: 'primary.main',
+                opacity: 0.85,
+              }}
+              aria-hidden
+            />
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="caption" fontWeight={800} color="primary" sx={{ letterSpacing: 0.02, display: 'block' }}>
+                Trích dẫn · {replyTarget.user || 'Ẩn danh'}
               </Typography>
-              <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.25 }}>
+              <Typography
+                component="blockquote"
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  mt: 0.75,
+                  m: 0,
+                  pl: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  maxHeight: 160,
+                  overflowY: 'auto',
+                  borderLeft: 'none',
+                  fontStyle: 'normal',
+                }}
+              >
                 {replyTarget.content || '[Đính kèm]'}
               </Typography>
             </Box>
             <Tooltip title="Hủy trả lời">
-              <IconButton size="small" onClick={onCancelReply} disabled={isLoading} aria-label="Hủy trả lời" sx={iconOutlinedSoft}>
+              <IconButton size="small" onClick={onCancelReply} disabled={isLoading} aria-label="Hủy trả lời" sx={{ flexShrink: 0, ...iconOutlinedSoft }}>
                 <CloseIcon fontSize="small" />
               </IconButton>
             </Tooltip>

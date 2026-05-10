@@ -328,7 +328,7 @@ func parseMessageRequest(c *gin.Context, requireUser bool) (*sendMessagePayload,
 			return nil, nil, err
 		}
 
-		if payload.User == "" {
+		if requireUser && payload.User == "" {
 			return nil, nil, errors.New("user is required")
 		}
 		if payload.Content == "" && fileHeader == nil {

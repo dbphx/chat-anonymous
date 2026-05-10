@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -7,6 +7,7 @@ import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
+import Chip from '@mui/material/Chip';
 import Pagination from '@mui/material/Pagination';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -29,6 +30,7 @@ import DataTable from '../components/DataTable';
 import SectionCard from '../components/SectionCard';
 import { totalPages as computeTotalPages } from '../utils/pagedList';
 import { roomUserCount } from '../utils/roomMeta';
+import { chipAccentColor, chipBesideLabelSx, chipNameColor, labelBesideChipSx, labelChipRowSx } from '../utils/chipInlineSx';
 import { iconPrimaryFilled, iconPrimaryFilledDisabled, iconOutlinedSoft, tableActionPrimary, tableActionCellInnerSx } from '../utils/iconSx';
 
 const LobbyView = ({
@@ -39,7 +41,7 @@ const LobbyView = ({
   rooms,
   roomPageMeta,
   onFetchRoomsPage,
-  onSelectRoom,
+  onJoinRoomSubmit,
   newRoomName,
   setNewRoomName,
   newRoomSecret,
@@ -52,8 +54,27 @@ const LobbyView = ({
   onClearUserSession,
 }) => {
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
+  const [joinDialogRoom, setJoinDialogRoom] = useState(null);
+  const [joinSecretInput, setJoinSecretInput] = useState('');
   const [roomSearchInput, setRoomSearchInput] = useState('');
   const [submittedRoomQuery, setSubmittedRoomQuery] = useState('');
+
+  useEffect(() => {
+    if (joinDialogRoom) {
+      setJoinSecretInput('');
+    }
+  }, [joinDialogRoom]);
+
+  const handleJoinDialogSubmit = async (event) => {
+    event.preventDefault();
+    if (!joinDialogRoom || userBusy) {
+      return;
+    }
+    const ok = await onJoinRoomSubmit(joinDialogRoom, joinSecretInput);
+    if (ok) {
+      setJoinDialogRoom(null);
+    }
+  };
 
   const handleRoomSearchSubmit = (event) => {
     event.preventDefault();
@@ -72,12 +93,21 @@ const LobbyView = ({
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <MainNavbar
         title="Anonymous Chat"
-        subtitle={userName ? `Xin chào, ${userName}` : 'Đăng nhập tên để tiếp tục'}
+        subtitle={userName ? (
+          <Box component="span" sx={labelChipRowSx}>
+            <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+              Xin chào
+            </Typography>
+            <Chip label={userName} title={userName} color={chipNameColor} variant="outlined" size="medium" sx={chipBesideLabelSx} />
+          </Box>
+        ) : (
+          'Đăng nhập tên để tiếp tục'
+        )}
         tabs={[]}
         activeTab="rooms"
         onTabChange={() => {}}
         mainClassName="lobby-layout"
-        right={(
+        sidebarTop={(
           <Tooltip title="Admin">
             <Button fullWidth variant="outlined" size="small" onClick={onAdminLogin} aria-label="Admin">
               <AdminPanelSettingsIcon fontSize="small" />
@@ -114,10 +144,13 @@ const LobbyView = ({
 
           {userName ? (
             <SectionCard title="Phiên làm việc" subheader="Thông tin người dùng hiện tại">
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between" flexWrap="wrap" useFlexGap>
-                <Typography variant="body1" sx={{ minWidth: 0 }}>
-                  <strong>Người dùng:</strong> {userName}
-                </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
+                <Box sx={{ ...labelChipRowSx, flex: { sm: '1 1 0%' }, minWidth: 0 }}>
+                  <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+                    Người dùng
+                  </Typography>
+                  <Chip label={userName} title={userName} color={chipNameColor} variant="outlined" size="medium" sx={chipBesideLabelSx} />
+                </Box>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Tooltip title="Sửa tên">
                     <IconButton size="small" onClick={onOpenEditUserName} aria-label="Sửa tên" sx={iconOutlinedSoft}>
@@ -219,7 +252,7 @@ const LobbyView = ({
                                 <IconButton
                                   size="small"
                                   color="primary"
-                                  onClick={() => onSelectRoom(room)}
+                                  onClick={() => setJoinDialogRoom(room)}
                                   aria-label="Vào phòng"
                                   sx={tableActionPrimary}
                                 >
@@ -260,6 +293,60 @@ const LobbyView = ({
           ) : null}
         </Stack>
       </MainNavbar>
+
+      <Dialog
+        open={Boolean(joinDialogRoom)}
+        onClose={() => !userBusy && setJoinDialogRoom(null)}
+        maxWidth="sm"
+        fullWidth
+        aria-labelledby="join-room-dialog-title"
+      >
+        <form onSubmit={handleJoinDialogSubmit}>
+          <DialogTitle id="join-room-dialog-title">Vào phòng</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 0.5 }}>
+              {joinDialogRoom ? (
+                <Stack spacing={1}>
+                  <Box sx={labelChipRowSx}>
+                    <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+                      Phòng
+                    </Typography>
+                    <Chip
+                      label={joinDialogRoom.name || joinDialogRoom.id}
+                      title={joinDialogRoom.name || joinDialogRoom.id}
+                      color={chipAccentColor}
+                      variant="outlined"
+                      size="medium"
+                      sx={chipBesideLabelSx}
+                    />
+                  </Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Người tham gia (ước lượng): {roomUserCount(joinDialogRoom)}
+                  </Typography>
+                </Stack>
+              ) : null}
+              <TextField
+                label="Mật khẩu phòng"
+                type="password"
+                value={joinSecretInput}
+                onChange={(event) => setJoinSecretInput(event.target.value)}
+                disabled={userBusy}
+                fullWidth
+                autoFocus
+                autoComplete="off"
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+            <Button type="button" variant="outlined" size="small" onClick={() => !userBusy && setJoinDialogRoom(null)} disabled={userBusy}>
+              Hủy
+            </Button>
+            <Button type="submit" variant="contained" size="small" disabled={userBusy} sx={{ ...iconPrimaryFilled, ...iconPrimaryFilledDisabled }}>
+              Vào phòng
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
 
       <Dialog
         open={createRoomOpen}

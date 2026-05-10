@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Paper from '@mui/material/Paper';
@@ -8,14 +8,24 @@ import { alpha, useTheme } from '@mui/material/styles';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Chat from '../components/Chat';
+import ChatMediaSummary from '../components/ChatMediaSummary';
+import ChatRoomSidebar from '../components/ChatRoomSidebar';
 import { parseJsonResponse } from '../utils/parseJsonResponse';
-import { iconOutlinedSoft } from '../utils/iconSx';
+import { roomUserCount } from '../utils/roomMeta';
+import { chipAccentColor, chipBesideLabelSx, chipFilledIdentitySx, chipNameColor, labelBesideChipSx, labelChipRowSx } from '../utils/chipInlineSx';
+import { iconOutlinedSoft, iconPrimaryFilled, iconPrimaryFilledDisabled } from '../utils/iconSx';
 
 const POLL_INTERVAL_MS = 3000;
 const ROOM_SECRET_HEADER = 'X-Room-Secret';
@@ -24,7 +34,7 @@ const roomHeaderStorageKey = (roomId) => `chat-anonymous:room-header-open:${room
 
 const readHeaderExpanded = (roomId) => {
   if (typeof window === 'undefined') {
-    return true;
+    return false;
   }
   try {
     const v = window.sessionStorage.getItem(roomHeaderStorageKey(roomId));
@@ -37,7 +47,7 @@ const readHeaderExpanded = (roomId) => {
   } catch {
     // ignore
   }
-  return true;
+  return false;
 };
 
 const normalizeMessages = (apiBaseUrl, items) => {
@@ -67,10 +77,32 @@ const toReplyBannerMessage = (message) => ({
   content: message.content || (message.file?.name ? `[File] ${message.file.name}` : ''),
 });
 
-const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayName, mode = 'user', adminToken, onUnauthorized, adminUser }) => {
+const ChatView = ({
+  apiBaseUrl,
+  room,
+  secret,
+  userName,
+  onLeave,
+  onEditDisplayName,
+  mode = 'user',
+  adminToken,
+  onUnauthorized,
+  adminUser,
+  lobbyRooms,
+  onRefreshLobbyRooms,
+  onNavigateToSidebarRoom,
+  onJoinRoomSubmit,
+  joinRoomError,
+  joinRoomBusy,
+  onClearJoinRoomError,
+}) => {
   const theme = useTheme();
   const [headerExpanded, setHeaderExpanded] = useState(() => readHeaderExpanded(room?.id));
   const [messages, setMessages] = useState([]);
+  const [joinDialogRoom, setJoinDialogRoom] = useState(null);
+  const [joinSecretInput, setJoinSecretInput] = useState('');
+  const [adminLobbyRooms, setAdminLobbyRooms] = useState([]);
+  const [adminLobbyLoading, setAdminLobbyLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
@@ -93,6 +125,59 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayNa
   useEffect(() => {
     setHeaderExpanded(readHeaderExpanded(room?.id));
   }, [room?.id]);
+
+  useEffect(() => {
+    if (!joinDialogRoom) {
+      setJoinSecretInput('');
+      return;
+    }
+    setJoinSecretInput('');
+    if (typeof onClearJoinRoomError === 'function') {
+      onClearJoinRoomError();
+    }
+  }, [joinDialogRoom, onClearJoinRoomError]);
+
+  useEffect(() => {
+    if (!isAdminMode || !adminToken || apiBaseUrl == null || String(apiBaseUrl).trim() === '') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const base = String(apiBaseUrl).replace(/\/$/, '');
+    setAdminLobbyLoading(true);
+
+    fetch(`${base}/api/admin/rooms?page=1&limit=100`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+      .then(parseJsonResponse)
+      .then((data) => {
+        if (!cancelled && Array.isArray(data.items)) {
+          setAdminLobbyRooms(data.items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAdminLobbyRooms([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAdminLobbyLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdminMode, adminToken, apiBaseUrl, room?.id]);
+
+  useEffect(() => {
+    if (isAdminMode || typeof onRefreshLobbyRooms !== 'function') {
+      return undefined;
+    }
+    onRefreshLobbyRooms();
+    return undefined;
+  }, [isAdminMode, room?.id, onRefreshLobbyRooms]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || room?.id == null) {
@@ -319,6 +404,43 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayNa
     }
   };
 
+  const sidebarRoomsList = isAdminMode ? adminLobbyRooms : (lobbyRooms || []);
+  const sidebarBusy = isAdminMode && adminLobbyLoading;
+
+  const scrollToMessageById = useCallback((messageId) => {
+    if (!messageId || typeof document === 'undefined') {
+      return;
+    }
+    const el = document.getElementById(`chat-message-${messageId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  const handleSidebarRoomClick = (nextRoom) => {
+    if (!nextRoom?.id || nextRoom.id === room?.id) {
+      return;
+    }
+    if (isAdminMode) {
+      if (typeof onNavigateToSidebarRoom === 'function') {
+        onNavigateToSidebarRoom(nextRoom);
+      }
+      return;
+    }
+    setJoinDialogRoom(nextRoom);
+  };
+
+  const handleJoinDialogSubmit = async (event) => {
+    event.preventDefault();
+    if (!joinDialogRoom || joinRoomBusy || typeof onJoinRoomSubmit !== 'function') {
+      return;
+    }
+    const ok = await onJoinRoomSubmit(joinDialogRoom, joinSecretInput);
+    if (ok) {
+      setJoinDialogRoom(null);
+    }
+  };
+
+  const busyJoin = Boolean(joinRoomBusy);
+
   return (
     <Box
       sx={{
@@ -326,12 +448,47 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayNa
         bgcolor: 'background.default',
         width: '100%',
         display: 'flex',
-        justifyContent: 'center',
-        px: { xs: 2, sm: 3 },
-        py: { xs: 2, sm: 3 },
+        flexDirection: { xs: 'column', lg: 'row' },
+        alignItems: 'stretch',
         boxSizing: 'border-box',
       }}
     >
+      <Paper
+        elevation={0}
+        variant="outlined"
+        sx={{
+          display: { xs: 'none', lg: 'flex' },
+          flexDirection: 'column',
+          width: { lg: 280 },
+          flexShrink: 0,
+          borderRadius: { xs: 0, lg: 2 },
+          borderColor: 'divider',
+          minHeight: { lg: '100vh' },
+          maxHeight: { lg: '100vh' },
+          overflow: 'hidden',
+          bgcolor: 'background.paper',
+        }}
+      >
+        <ChatRoomSidebar
+          rooms={sidebarRoomsList}
+          currentRoomId={room?.id}
+          onRoomClick={handleSidebarRoomClick}
+          loading={sidebarBusy}
+          title={isAdminMode ? 'Phòng (admin)' : 'Phòng có sẵn'}
+        />
+      </Paper>
+
+      <Box
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          px: { xs: 2, sm: 3 },
+          py: { xs: 2, sm: 3 },
+          boxSizing: 'border-box',
+        }}
+      >
       <Paper
         elevation={0}
         variant="outlined"
@@ -435,17 +592,18 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayNa
                 alignItems={{ xs: 'stretch', sm: 'center' }}
                 justifyContent="space-between"
               >
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                  <Chip
-                    label={currentUser}
-                    color="primary"
-                    variant="filled"
-                    size="small"
-                    sx={{ fontWeight: 700, px: 0.5, height: 30, '& .MuiChip-label': { px: 1.25 } }}
-                  />
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  flexWrap="nowrap"
+                  useFlexGap
+                  sx={{ minWidth: 0, width: 'fit-content', maxWidth: '100%', flexShrink: 1 }}
+                >
+                  <Chip label={currentUser} title={currentUser} color={chipNameColor} variant="filled" size="medium" sx={chipFilledIdentitySx} />
                   {!isAdminMode && typeof onEditDisplayName === 'function' ? (
                     <Tooltip title="Đổi tên hiển thị">
-                      <IconButton size="small" onClick={onEditDisplayName} aria-label="Đổi tên hiển thị" sx={iconOutlinedSoft}>
+                      <IconButton size="small" onClick={onEditDisplayName} aria-label="Đổi tên hiển thị" sx={{ flexShrink: 0, ...iconOutlinedSoft }}>
                         <EditIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -515,6 +673,87 @@ const ChatView = ({ apiBaseUrl, room, secret, userName, onLeave, onEditDisplayNa
           />
         </Box>
       </Paper>
+      </Box>
+
+      <Paper
+        elevation={0}
+        variant="outlined"
+        sx={{
+          display: { xs: 'none', lg: 'flex' },
+          flexDirection: 'column',
+          width: { lg: 300 },
+          flexShrink: 0,
+          borderRadius: { xs: 0, lg: 2 },
+          borderColor: 'divider',
+          minHeight: { lg: '100vh' },
+          maxHeight: { lg: '100vh' },
+          overflow: 'hidden',
+          bgcolor: 'grey.50',
+        }}
+      >
+        <ChatMediaSummary messages={messages} onOpenAttachment={scrollToMessageById} />
+      </Paper>
+
+      {!isAdminMode ? (
+        <Dialog
+          open={Boolean(joinDialogRoom)}
+          onClose={() => !busyJoin && setJoinDialogRoom(null)}
+          maxWidth="sm"
+          fullWidth
+          aria-labelledby="chat-join-room-dialog-title"
+        >
+          <form onSubmit={handleJoinDialogSubmit}>
+            <DialogTitle id="chat-join-room-dialog-title">Chuyển phòng</DialogTitle>
+            <DialogContent>
+              <Stack spacing={2} sx={{ mt: 0.5 }}>
+                {joinRoomError ? (
+                  <Alert severity="error" onClose={typeof onClearJoinRoomError === 'function' ? onClearJoinRoomError : undefined}>
+                    {joinRoomError}
+                  </Alert>
+                ) : null}
+                {joinDialogRoom ? (
+                  <Stack spacing={1}>
+                    <Box sx={labelChipRowSx}>
+                      <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+                        Phòng
+                      </Typography>
+                      <Chip
+                        label={joinDialogRoom.name || joinDialogRoom.id}
+                        title={joinDialogRoom.name || joinDialogRoom.id}
+                        color={chipAccentColor}
+                        variant="outlined"
+                        size="medium"
+                        sx={chipBesideLabelSx}
+                      />
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Người tham gia (ước lượng): {roomUserCount(joinDialogRoom)}
+                    </Typography>
+                  </Stack>
+                ) : null}
+                <TextField
+                  label="Mật khẩu phòng"
+                  type="password"
+                  value={joinSecretInput}
+                  onChange={(event) => setJoinSecretInput(event.target.value)}
+                  disabled={busyJoin}
+                  fullWidth
+                  autoFocus
+                  autoComplete="off"
+                />
+              </Stack>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+              <Button type="button" variant="outlined" size="small" onClick={() => !busyJoin && setJoinDialogRoom(null)} disabled={busyJoin}>
+                Hủy
+              </Button>
+              <Button type="submit" variant="contained" size="small" disabled={busyJoin} sx={{ ...iconPrimaryFilled, ...iconPrimaryFilledDisabled }}>
+                Vào phòng
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
+      ) : null}
     </Box>
   );
 };

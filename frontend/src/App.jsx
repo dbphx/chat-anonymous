@@ -455,6 +455,24 @@ function App() {
     }
   };
 
+  const refreshLobbyRoomsForChat = useCallback(async () => {
+    setUserBusy(true);
+    try {
+      await fetchRoomsPage({
+        q: '',
+        page: 1,
+        limit: DEFAULT_ROOM_PAGE_LIMIT,
+      });
+      setUserError('');
+    } catch (loadError) {
+      setUserError(loadError.message);
+    } finally {
+      setUserBusy(false);
+    }
+  }, [fetchRoomsPage]);
+
+  const clearRoomJoinError = useCallback(() => setUserError(''), []);
+
   const handleSetUserName = (event) => {
     event.preventDefault();
     const trimmedName = draftUserName.trim();
@@ -495,6 +513,8 @@ function App() {
       return;
     }
 
+    const secretForRoom = newRoomSecret.trim();
+
     setUserBusy(true);
     setUserError('');
 
@@ -504,7 +524,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newRoomName.trim(),
-          password: newRoomSecret.trim(),
+          password: secretForRoom,
         }),
       });
       const data = await parseJsonResponse(response);
@@ -516,11 +536,53 @@ function App() {
       setNewRoomName('');
       setNewRoomSecret('');
       setSelectedRoom(data);
-      setJoinedRoom(null);
+      setJoinedRoom(data);
+      setRoomSecret(secretForRoom);
       setJoinSecret('');
-      navigate(`/room/${data.id}`);
+      navigate(`/chat/${data.id}`);
     } catch (createError) {
       setUserError(createError.message);
+    } finally {
+      setUserBusy(false);
+    }
+  };
+
+  const handleJoinRoomSubmit = async (room, secret) => {
+    if (!room?.id) {
+      setUserError('Chưa chọn phòng');
+      return false;
+    }
+
+    const trimmed = String(secret || '').trim();
+    if (!trimmed) {
+      setUserError('Cần nhập mật khẩu phòng');
+      return false;
+    }
+
+    setUserBusy(true);
+    setUserError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/rooms/${room.id}/join_room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: trimmed }),
+      });
+      const data = await parseJsonResponse(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Không vào được phòng');
+      }
+
+      setJoinedRoom(data);
+      setSelectedRoom(data);
+      setRoomSecret(trimmed);
+      setJoinSecret('');
+      navigate(`/chat/${data.id}`);
+      return true;
+    } catch (joinError) {
+      setUserError(joinError.message);
+      return false;
     } finally {
       setUserBusy(false);
     }
@@ -530,52 +592,19 @@ function App() {
     event.preventDefault();
 
     if (!selectedRoom) {
-      setUserError('Select a room first');
+      setUserError('Chưa chọn phòng');
       return;
     }
 
-    if (!joinSecret.trim()) {
-      setUserError('Room secret is required');
-      return;
-    }
-
-    setUserBusy(true);
-    setUserError('');
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/rooms/${selectedRoom.id}/join_room`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ secret: joinSecret.trim() }),
-      });
-      const data = await parseJsonResponse(response);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to join room');
-      }
-
-      setJoinedRoom(data);
-      setRoomSecret(joinSecret.trim());
-      setJoinSecret('');
-      navigate(`/chat/${data.id}`);
-    } catch (joinError) {
-      setUserError(joinError.message);
-    } finally {
-      setUserBusy(false);
-    }
+    await handleJoinRoomSubmit(selectedRoom, joinSecret);
   };
 
   const handleLeaveRoom = () => {
-    const room = joinedRoom || selectedRoom;
-
     setJoinedRoom(null);
-    setSelectedRoom(room);
     setJoinSecret('');
     setUserError('');
-
-    if (room) {
-      navigate(`/room/${room.id}`);
-    }
+    setSelectedRoom(null);
+    navigate('/');
   };
 
   const handleBackToLobby = () => {
@@ -584,14 +613,6 @@ function App() {
     setJoinSecret('');
     setUserError('');
     navigate('/');
-  };
-
-  const handleSelectRoom = (room) => {
-    setSelectedRoom(room);
-    setJoinedRoom(null);
-    setJoinSecret('');
-    setUserError('');
-    navigate(`/room/${room.id}`);
   };
 
   const handleAdminLogin = async ({ username, password }) => {
@@ -705,6 +726,7 @@ function App() {
         adminToken={adminAuth.token}
         adminUser={adminUser}
         onUnauthorized={handleAdminUnauthorized}
+        onNavigateToSidebarRoom={(nextRoom) => navigate(`/admin/rooms/${nextRoom.id}`)}
       />
     );
   }
@@ -717,7 +739,7 @@ function App() {
     rooms,
     roomPageMeta,
     onFetchRoomsPage: handleFetchRoomsPage,
-    onSelectRoom: handleSelectRoom,
+    onJoinRoomSubmit: handleJoinRoomSubmit,
     newRoomName,
     setNewRoomName,
     newRoomSecret,
@@ -750,6 +772,12 @@ function App() {
           userName={userName}
           onLeave={handleLeaveRoom}
           onEditDisplayName={() => setEditNameOpen(true)}
+          lobbyRooms={rooms}
+          onRefreshLobbyRooms={refreshLobbyRoomsForChat}
+          onJoinRoomSubmit={handleJoinRoomSubmit}
+          joinRoomError={userError}
+          joinRoomBusy={userBusy}
+          onClearJoinRoomError={clearRoomJoinError}
         />
         {changeNameDialog}
       </>

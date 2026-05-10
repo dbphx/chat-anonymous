@@ -34,6 +34,8 @@ const MainNavbar = ({
   tabs,
   activeTab,
   onTabChange,
+  /** Nút / nhóm nút phía trên danh mục tab (vd. vào Admin từ portal) */
+  sidebarTop,
   right,
   children,
   mainClassName = '',
@@ -84,6 +86,8 @@ const MainNavbar = ({
             borderBottom: '1px solid',
             borderColor: 'divider',
             background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+            minWidth: 0,
+            overflow: 'hidden',
           }}
         >
           {!collapsed ? (
@@ -97,7 +101,21 @@ const MainNavbar = ({
                     {subtitle}
                   </Typography>
                 ) : (
-                  <Box sx={{ mt: 0.5 }}>{subtitle}</Box>
+                  <Box
+                    sx={{
+                      mt: 0.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: 'nowrap',
+                      gap: 1,
+                      minWidth: 0,
+                      width: '100%',
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {subtitle}
+                  </Box>
                 )
               ) : null}
             </>
@@ -117,6 +135,31 @@ const MainNavbar = ({
             </Tooltip>
           )}
         </Box>
+
+        {sidebarTop ? (
+          <Box
+            sx={{
+              px: 1,
+              py: 1,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1,
+              alignItems: 'stretch',
+              justifyContent: 'center',
+              '& .MuiButton-root': collapsed ? { minWidth: 0, px: 1 } : {},
+              '& .MuiButton-root, & .MuiIconButton-root': {
+                display: 'inline-flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                minHeight: 36,
+              },
+            }}
+          >
+            {sidebarTop}
+          </Box>
+        ) : null}
 
         <Box sx={{ flex: 1, overflow: 'auto', py: 1 }}>
           {tabs?.length ? (

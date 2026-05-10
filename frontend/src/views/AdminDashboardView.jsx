@@ -31,6 +31,7 @@ import SectionCard from '../components/SectionCard';
 import { parseJsonResponse } from '../utils/parseJsonResponse';
 import { normalizePagedResponse, totalPages as computeTotalPages } from '../utils/pagedList';
 import { roomUserCount } from '../utils/roomMeta';
+import { chipBesideLabelSx, chipNameColor } from '../utils/chipInlineSx';
 import {
   iconPrimaryFilled,
   iconPrimaryFilledDisabled,
@@ -362,10 +363,26 @@ const AdminDashboardView = ({
   };
 
   const subtitleChips = (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-      <Typography variant="caption" color="text.secondary">Đăng nhập</Typography>
-      <Chip size="small" label={adminUser?.username || '—'} color="primary" variant="outlined" />
-      <Chip size="small" label={adminUser?.role || '—'} variant="outlined" />
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      flexWrap="nowrap"
+      useFlexGap
+      sx={{ minWidth: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }}
+    >
+      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+        Đăng nhập
+      </Typography>
+      <Chip
+        size="medium"
+        label={adminUser?.username || '—'}
+        title={adminUser?.username || undefined}
+        color={chipNameColor}
+        variant="outlined"
+        sx={chipBesideLabelSx}
+      />
+      <Chip size="small" label={adminUser?.role || '—'} variant="outlined" sx={{ flexShrink: 0 }} />
     </Stack>
   );
 

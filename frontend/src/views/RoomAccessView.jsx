@@ -2,6 +2,7 @@ import React from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
@@ -10,6 +11,7 @@ import Alert from '@mui/material/Alert';
 import MainNavbar from '../components/MainNavbar';
 import SectionCard from '../components/SectionCard';
 import { roomUserCount } from '../utils/roomMeta';
+import { chipAccentColor, chipBesideLabelSx, chipNameColor, labelBesideChipSx, labelChipRowSx } from '../utils/chipInlineSx';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import EditIcon from '@mui/icons-material/Edit';
@@ -33,34 +35,40 @@ const RoomAccessView = ({
     <MainNavbar
       title={selectedRoom ? `Phòng: ${selectedRoom.name}` : 'Phòng'}
       subtitle={userName ? (
-        <Typography component="span" variant="body2" color="text.secondary">
-          Người dùng hiện tại: <strong>{userName}</strong>
-        </Typography>
+        <Box component="span" sx={labelChipRowSx}>
+          <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+            Người dùng hiện tại
+          </Typography>
+          <Chip label={userName} title={userName} color={chipNameColor} variant="outlined" size="medium" sx={chipBesideLabelSx} />
+        </Box>
       ) : null}
       mainClassName="lobby-layout"
+      sidebarTop={(
+        <Tooltip title="Admin">
+          <Button fullWidth variant="outlined" size="small" onClick={onAdminLogin} aria-label="Admin">
+            <AdminPanelSettingsIcon fontSize="small" />
+          </Button>
+        </Tooltip>
+      )}
       right={(
-        <Stack spacing={1} width="100%">
-          <Tooltip title="Về danh sách">
-            <Button fullWidth variant="outlined" size="small" onClick={onBackToLobby} aria-label="Về danh sách">
-              <ViewListIcon fontSize="small" />
-            </Button>
-          </Tooltip>
-          <Tooltip title="Admin">
-            <Button fullWidth variant="outlined" size="small" onClick={onAdminLogin} aria-label="Admin">
-              <AdminPanelSettingsIcon fontSize="small" />
-            </Button>
-          </Tooltip>
-        </Stack>
+        <Tooltip title="Về danh sách">
+          <Button fullWidth variant="outlined" size="small" onClick={onBackToLobby} aria-label="Về danh sách">
+            <ViewListIcon fontSize="small" />
+          </Button>
+        </Tooltip>
       )}
     >
       <Stack spacing={4}>
         {userError ? <Alert severity="error">{userError}</Alert> : null}
 
         <SectionCard title="Phiên làm việc" subheader="Người dùng đang dùng để vào phòng">
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
-            <Typography variant="body1">
-              <strong>Người dùng:</strong> {userName}
-            </Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2} flexWrap="wrap" useFlexGap>
+            <Box sx={{ ...labelChipRowSx, flex: '1 1 0%', minWidth: 0 }}>
+              <Typography component="span" variant="body2" color="text.secondary" sx={labelBesideChipSx}>
+                Người dùng
+              </Typography>
+              <Chip label={userName} title={userName} color={chipNameColor} variant="outlined" size="medium" sx={chipBesideLabelSx} />
+            </Box>
             <Tooltip title="Sửa tên">
               <IconButton size="small" onClick={onOpenEditUserName} aria-label="Sửa tên" sx={iconOutlinedSoft}>
                 <EditIcon fontSize="small" />

@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useTheme } from '@mui/material/styles';
+import { isImageAttachment } from '../utils/fileTypes';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Paper from '@mui/material/Paper';
@@ -24,15 +26,22 @@ const Message = ({
   canManageMessage,
   onTogglePin,
 }) => {
+  const theme = useTheme();
   const isOwnMessage = currentUser && message.user === currentUser;
   const canEditMessage = canManageMessage || isOwnMessage;
   const canDeleteMessage = canManageMessage || isOwnMessage;
   const canPinMessage = canEditMessage && typeof onTogglePin === 'function';
   const hasText = Boolean(message.content);
   const hasFile = Boolean(message.file?.url);
+  const showImagePreview = hasFile && isImageAttachment(message.file);
   const replyPreview = message.reply_to;
   const [anchorEl, setAnchorEl] = useState(null);
+  const [imageBroken, setImageBroken] = useState(false);
   const menuOpen = Boolean(anchorEl);
+
+  useEffect(() => {
+    setImageBroken(false);
+  }, [message.id, message.file?.url]);
 
   const handleCloseMenu = () => {
     setAnchorEl(null);
@@ -60,8 +69,13 @@ const Message = ({
           px: 2,
           py: 1.35,
           borderRadius: 2,
-          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.04)',
-          bgcolor: isOwnMessage ? 'primary.main' : 'grey.50',
+          boxShadow: isOwnMessage
+            ? '0 1px 2px rgba(29, 78, 216, 0.2), 0 4px 14px rgba(37, 99, 235, 0.18)'
+            : '0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.04)',
+          bgcolor: isOwnMessage ? 'transparent' : 'grey.50',
+          backgroundImage: isOwnMessage
+            ? `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 45%, ${theme.palette.primary.light} 100%)`
+            : 'none',
           border: isOwnMessage ? 'none' : '1px solid rgba(15, 23, 42, 0.08)',
           ...(message.pinned
             ? {
@@ -88,18 +102,33 @@ const Message = ({
         </Stack>
         {replyPreview ? (
           <Box
+            component="blockquote"
             sx={{
               mt: 1,
-              pl: 1.5,
-              borderLeft: '3px solid',
-              borderColor: isOwnMessage ? 'rgba(255,255,255,0.5)' : 'divider',
-              opacity: 0.95,
+              mx: 0,
+              py: 1,
+              px: 1.25,
+              borderRadius: 1,
+              borderLeft: '4px solid',
+              borderColor: isOwnMessage ? 'rgba(255,255,255,0.65)' : 'primary.main',
+              bgcolor: isOwnMessage ? 'rgba(0,0,0,0.12)' : 'action.hover',
+              opacity: 0.98,
             }}
           >
-            <Typography variant="caption" display="block" sx={{ fontWeight: 600 }}>
-              Trả lời {replyPreview.user || 'Ẩn danh'}
+            <Typography variant="caption" display="block" sx={{ fontWeight: 700, opacity: 0.92 }}>
+              Trích dẫn · {replyPreview.user || 'Ẩn danh'}
             </Typography>
-            <Typography variant="body2">{replyPreview.content || '[Attachment]'}</Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                mt: 0.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                opacity: 0.95,
+              }}
+            >
+              {replyPreview.content || '[Đính kèm]'}
+            </Typography>
           </Box>
         ) : null}
         {hasText ? (
@@ -108,18 +137,40 @@ const Message = ({
           </Typography>
         ) : null}
         {hasFile ? (
-          <Link
-            href={message.file.url}
-            target="_blank"
-            rel="noreferrer"
-            underline="always"
-            sx={{ mt: 1, display: 'inline-block' }}
-          >
-            <Typography variant="body2" component="span">
-              {message.file.name}
-              {message.file.size ? ` (${message.file.size} bytes)` : ''}
-            </Typography>
-          </Link>
+          showImagePreview && !imageBroken ? (
+            <Box sx={{ mt: 1 }}>
+              <Box
+                component="img"
+                src={message.file.url}
+                alt={message.file.name || 'Ảnh đính kèm'}
+                loading="lazy"
+                onError={() => setImageBroken(true)}
+                sx={{
+                  display: 'block',
+                  maxWidth: '100%',
+                  width: 'auto',
+                  height: 'auto',
+                  maxHeight: { xs: 280, sm: 360 },
+                  borderRadius: 1,
+                  objectFit: 'contain',
+                  bgcolor: isOwnMessage ? 'rgba(0,0,0,0.1)' : 'grey.100',
+                }}
+              />
+            </Box>
+          ) : (
+            <Link
+              href={message.file.url}
+              target="_blank"
+              rel="noreferrer"
+              underline="always"
+              sx={{ mt: 1, display: 'inline-block' }}
+            >
+              <Typography variant="body2" component="span">
+                {message.file.name}
+                {message.file.size ? ` (${message.file.size} bytes)` : ''}
+              </Typography>
+            </Link>
+          )
         ) : null}
         <Box
           sx={{
